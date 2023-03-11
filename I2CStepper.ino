@@ -23,6 +23,7 @@
 #define STEPPER_STEP 3
 #define STEPPER_DIR 4
 #define STEPPER_EN 5
+
 // Настройки для шагового двигателя
 #define STEPPER_MS 2
 #define STEPPER_STEPS (200 * STEPPER_MS) //количество шагов, 200 x MS
@@ -30,9 +31,9 @@
 
 
 #define MIXER_PUMP_PIN 13 // RELE_PIN1
-#define RELE_PIN2 10
-#define RELE_PIN3 11
-#define RELE_PIN4 12
+#define RELE_PIN2 10      // RELE_PIN2
+#define RELE_PIN3 11      // RELE_PIN3
+#define RELE_PIN4 12      // RELE_PIN4
 
 // Пины для Encoder
 #define ENC_CLK 7 //S2
@@ -53,15 +54,15 @@
 GStepper< STEPPER2WIRE> stepper(STEPPER_STEPS, STEPPER_STEP, STEPPER_DIR, STEPPER_EN);
 
 // Объявляем переменные и константы:
-iarduino_I2C_connect I2C2;                            // объявляем объект I2C2 для работы c библиотекой iarduino_I2C_connect
-byte                 REG_Array[9];                          // объявляем массив, данные которого будут доступны мастеру (для чтения/записи) по шине I2C
-uint16_t             set_spd;
-volatile uint16_t             curr_spd;
-uint16_t             set_time;
-byte                 set_dir;
-bool                 stepper_state;
-byte                 rele_state;
-uint8_t              rele_pin[] = {MIXER_PUMP_PIN, RELE_PIN2, RELE_PIN3, RELE_PIN4};
+iarduino_I2C_connect I2C2;                            // объект I2C2 для работы c библиотекой iarduino_I2C2_connect
+byte                 REG_Array[9];                    // массив, данные которого будут доступны мастеру (для чтения/записи) по шине I2C
+uint16_t             set_spd;                         // храним значение установленной скорости
+volatile uint16_t    curr_spd;                        // храним предыдущую установленную скорость
+uint16_t             set_time;                        // храним значение установленного времени
+byte                 set_dir;                         // храним значение направления вращения шаговика
+bool                 stepper_state;                   // храним статус шаговика
+byte                 rele_state;                      // байт для статусов 4 реле
+uint8_t              rele_pin[] = {MIXER_PUMP_PIN, RELE_PIN2, RELE_PIN3, RELE_PIN4};//описание пинов реле
 
 Encoder encoder(ENC_CLK, ENC_DT, ENC_SW, TYPE2);
 
@@ -73,24 +74,26 @@ void isrENK() {
 
 void setup() {
   Serial.begin(115200);
-  attachPCINT(digitalPinToPCINT(ENC_CLK), isrENK, CHANGE);
-  attachPCINT(digitalPinToPCINT(ENC_DT), isrENK, CHANGE);
-  attachPCINT(digitalPinToPCINT(ENC_SW), isrENK, CHANGE);
+  attachPCINT(digitalPinToPCINT(ENC_CLK), isrENK, CHANGE); //вешаем прерывания для обработки энкодера
+  attachPCINT(digitalPinToPCINT(ENC_DT), isrENK, CHANGE);  //вешаем прерывания для обработки энкодера
+  attachPCINT(digitalPinToPCINT(ENC_SW), isrENK, CHANGE);  //вешаем прерывания для обработки энкодера
 
   Wire.begin(0x01);                                   // инициируем подключение к шине I2C в качестве ведомого (slave) устройства, с указанием своего адреса на шине.
-  Wire2.begin();
+  Wire2.begin();                                      // инициируем подключение к шине I2C в качестве мастера
   I2C2.begin(REG_Array);                              // инициируем возможность чтения/записи данных по шине I2C, из/в указываемый массив
   stepper.setRunMode(FOLLOW_POS);
-  //stepper.setAcceleration(100);
   REG_Array[8] = 0;
-  pinMode(MIXER_PUMP_PIN, OUTPUT);
+  pinMode(MIXER_PUMP_PIN, OUTPUT);                    // используем ногу для вывода
+  pinMode(RELE_PIN2, OUTPUT);                         // используем ногу для вывода
+  pinMode(RELE_PIN3, OUTPUT);                         // используем ногу для вывода
+  pinMode(RELE_PIN4, OUTPUT);                         // используем ногу для вывода
 
-  menu_init();
+  menu_init();                                        // инициализуерм меню экрана
 
-  stepper.brake();
-  stepper.disable();
+  stepper.brake();                                    // тормозим шаговик
+  stepper.disable();                                  // отключаем шаговик
 
-  Timer1.initialize(40);
+  Timer1.initialize(40);                              // инициализируем таймер для упарвления шаговиком
   Timer1.attachInterrupt(stp_tick);
 
   Serial.println("Ready");
@@ -101,11 +104,13 @@ void stp_tick(void)
   stepper.tick();
 }
 
+//возвращаем время, оставшееся до конца работы шаговика для отображения на экране
 float get_stepper_time(void) {
   if (set_time == 0 || stepper_state) set_time = get_stepper_time_from_array();
   return (uint16_t)set_time;
 }
 
+//возвращаем время, оставшееся до конца работы шаговика
 uint16_t get_stepper_time_from_array(void) {
   float t;
   float s = get_speed_from_array();
@@ -114,6 +119,7 @@ uint16_t get_stepper_time_from_array(void) {
   return t;
 }
 
+//возвращаем количество шагов
 uint32_t get_target_from_array(void) {
   while (REG_Array[8] == 1) {
     delay(1);
@@ -125,6 +131,7 @@ uint32_t get_target_from_array(void) {
   return t;
 }
 
+//сохраняем количество шагов шаговика в массив для обмена с Самоваром
 void set_target_to_array(uint32_t target) {
   REG_Array[3] = target >> 24;
   REG_Array[4] = target >> 16;
@@ -132,16 +139,18 @@ void set_target_to_array(uint32_t target) {
   REG_Array[6] = target;
 }
 
-
+//возвращаем скрость в шагах в секунду из скорости в оборотах/мин
 uint16_t get_spd_stp(uint16_t spd) {
   return (float)spd * STEPPER_STEPS / 60;
 }
 
+//возвращаем скорость в оборотах/мин из шагов в секунду
 float get_speed(void) {
   if (set_spd == 0) set_spd = get_speed_from_array() / STEPPER_STEPS * 60;
   return set_spd;
 }
 
+//получаем скорость в шагах в секунду из массива
 uint16_t get_speed_from_array(void) {
   while (REG_Array[8] == 1) {
     delay(1);
@@ -151,16 +160,19 @@ uint16_t get_speed_from_array(void) {
   return t;
 }
 
+//сохраняем скорость в массив для обмена с Самоваром
 void set_speed_to_array(uint16_t spd) {
   REG_Array[0] = spd >> 8;
   REG_Array[1] = spd;
 }
 
+//получаем направление движения для отображения на экране
 byte get_direction(void) {
   if (set_dir == 0) set_dir = get_direction_from_array();
   return set_dir;
 }
 
+//получаем направление движения из массива
 byte get_direction_from_array(void) {
   while (REG_Array[8] == 1) {
     delay(1);
@@ -168,19 +180,23 @@ byte get_direction_from_array(void) {
   return REG_Array[2];
 }
 
+//сохраняем направление движения в массив для обмена с Самоваром
 void set_direction_to_array(byte dir) {
   REG_Array[2] = dir;
 }
 
+//сохраняем состояние насоса в массив для обмена с Самоваром
 bool set_mixer_pump_state(bool state) {
   set_rele_state_to_array(1, state);
   return state;
 }
 
+//получаем состояние насоса из массива
 byte get_mixer_pump_from_array(void) {
   return get_rele_state_from_array(1);
 }
 
+//получаем состояние реле по номеру из массива
 bool get_rele_state_from_array(byte r) {
   while (REG_Array[8] == 1) {
     delay(1);
@@ -188,6 +204,7 @@ bool get_rele_state_from_array(byte r) {
   return bit_is_set(REG_Array[7], r - 1);
 }
 
+//сохраняем состояние реле по номеру в массив для обмена с Самоваром
 bool set_rele_state_to_array(byte r, bool s) {
   while (REG_Array[8] == 1) {
     delay(1);
@@ -204,6 +221,7 @@ bool set_rele_state_to_array(byte r, bool s) {
   return s;
 }
 
+//запускаем шаговик. Есть два варианта - через меню и через установленные значения в массиве.
 void start_stepper(bool from_int) {
   uint32_t target;
   uint16_t spd;
@@ -247,6 +265,7 @@ void start_stepper(bool from_int) {
   curr_spd = spd;
 }
 
+//останавливаем шаговик
 void stop_stepper() {
   set_target_to_array(0);
 
@@ -258,19 +277,22 @@ void stop_stepper() {
   Serial.println("======================");
 }
 
+//основной цикл
 void loop() {
   uint32_t target;
   uint16_t spd;
 
+  //опрашиваем состояние энкодера и работаем с меню
   poll_menu();
 
-  // Check rele state && toggle rele
+  //проверяем статус реле и переключаем, если текущий статус отличается от установленного в массиве
   for (byte i = 0; i < 4; i++) {
     if (bit_is_set(rele_state, i) != bit_is_set(REG_Array[7], i)) {
       set_rele_state_to_array(i + 1, bit_is_set(REG_Array[7], i));
     }
   }
 
+  //обрабатываем измененения статуса шаговика
   target = get_target_from_array();
   spd = get_speed_from_array();
 

@@ -107,11 +107,13 @@ void blankFunction() {
   return;
 }
 
+//функция для возврата в основное меню
 void backFunction() {
   main_menu.change_screen(&main_screen);
   main_menu.update();
 }
 
+//инкремент скорости шаговика
 void spdIncFunction() {
   byte c = m_cnt;
   if (c < 3) c = 1;
@@ -124,6 +126,7 @@ void spdIncFunction() {
   }
 }
 
+//декремент скорости шаговика
 void spdDecFunction() {
   byte c = m_cnt;
   if (c < 3) c = 1;
@@ -136,6 +139,7 @@ void spdDecFunction() {
   }
 }
 
+//инкремент времени работы шаговика
 void timeIncFunction() {
   byte c = m_cnt;
   if (c < 3) c = 1;
@@ -144,6 +148,7 @@ void timeIncFunction() {
   if (set_time > 60000) set_time = 60000;
 }
 
+//декремент времени работы шаговика
 void timeDecFunction() {
   byte c = m_cnt;
   if (c < 3) c = 1;
@@ -152,11 +157,13 @@ void timeDecFunction() {
   else set_time -= 1 * multiplier * c;
 }
 
+//изменение направления вращения шаговика
 void dirFunction() {
   set_dir = !set_dir;
   stepper.reverse(set_dir);
 }
 
+//инициализация меню
 void menu_init(void) {
   lcd.init();
   lcd.begin(LCD_COLUMNS, LCD_ROWS);
@@ -200,6 +207,7 @@ void menu_init(void) {
   main_menu.set_focusedLine(0);
 }
 
+//функция для опроса состояния энкодера и обработки меню
 void poll_menu(void) {
   bool updscreen = true;
 
@@ -277,6 +285,4 @@ void poll_menu(void) {
     oldS = millis() / 1000;
   }
 }
-
-
 #endif
