@@ -1,3 +1,5 @@
+#define I2CSTEPPER_VERSION 0.1
+
 #define LIQUIDMENU_LIBRARY LiquidCrystal_I2C2_LIBRARY
 #define DisplayClass LiquidCrystal_I2C2
 #define DRIVER_STEP_TIME 5
