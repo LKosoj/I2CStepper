@@ -30,6 +30,7 @@
 #define STEPPER_MAX_SPEED 1200
 
 
+//Пины для реле
 #define MIXER_PUMP_PIN 13 // RELE_PIN1
 #define RELE_PIN2 10      // RELE_PIN2
 #define RELE_PIN3 11      // RELE_PIN3
