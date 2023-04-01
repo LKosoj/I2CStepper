@@ -1,7 +1,7 @@
 #ifndef __I2CSTEPPER_H
 #define __I2CSTEPPER_H
 
-#define I2CSTEPPER_VERSION 0.1
+#define I2CSTEPPER_VERSION 0.2
 
 // Пины для I2C Master - подключение экрана и потенциально других устройств
 // SDA_PIN 0 //A0
