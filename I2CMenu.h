@@ -17,11 +17,6 @@
 #define LCD_COLUMNS 16
 #define LCD_ROWS 2
 
-const char c_On[]  = "On ";
-const char c_Off[]  = "Off";
-const char c_Mixer[]  = "Mxr";
-const char c_Pump[]  = "Pmp";
-
 enum FunctionTypes {
   increase = 1,
   decrease = 2,
@@ -61,24 +56,46 @@ void write_config();
 
 void(* resetFunc) (void) = 0;
 
-LiquidLine back_line(10, 1, "<BACK");
+//строки для меню
+const char c_On[] PROGMEM =  "On ";
+const char c_Off[] PROGMEM = "Off";
+const char c_Mixer[] PROGMEM = "Mixer";
+const char c_Pump[] PROGMEM =  "Pump ";
 
-LiquidLine main_line1(0, 0, "STP> ", get_stepper_time);
-LiquidLine main_line2(0, 1, ">Pmp: ", get_mixer_pump_state);
-LiquidLine main_line3(0, 2, ">R2: ", get_rele_state2);
-LiquidLine main_line4(0, 3, ">R3: ", get_rele_state3);
-LiquidLine main_line5(0, 4, ">R4: ", get_rele_state4);
-LiquidLine main_line6(0, 5, "SET>");
+const char str_BACK[] PROGMEM = "<BACK";
+const char str_STP[] PROGMEM = "STP> ";
+const char str_Pmp[] PROGMEM = ">Pump: ";
+const char str_R2[] PROGMEM = ">Rele2: ";
+const char str_R3[] PROGMEM = ">Rele3: ";
+const char str_R4[] PROGMEM = ">Rele4: ";
+const char str_SET[] PROGMEM = "SETUP>";
+const char str_STP_Spd[] PROGMEM = "STP Spd: ";
+const char str_STP_Dir[] PROGMEM = "STP Dir: ";
+const char str_STP_Time[] PROGMEM = "STP Time: ";
+const char str_STP_Start[] PROGMEM = "STP Start: ";
+const char str_SET_Type[] PROGMEM = ">Type: ";
+const char str_SET_Stp_Ml[] PROGMEM = ">STP/ML: ";
+
+
+
+LiquidLine back_line(10, 1, str_BACK);
+
+LiquidLine main_line1(0, 0, str_STP, get_stepper_time);
+LiquidLine main_line2(0, 1, str_Pmp, get_mixer_pump_state);
+LiquidLine main_line3(0, 2, str_R2, get_rele_state2);
+LiquidLine main_line4(0, 3, str_R3, get_rele_state3);
+LiquidLine main_line5(0, 4, str_R4, get_rele_state4);
+LiquidLine main_line6(0, 5, str_SET);
 LiquidScreen main_screen(main_line1, main_line2);
 
-LiquidLine stp_line_spd(0, 0, "STP S: ", get_speed);
-LiquidLine stp_line_dir(0, 1, "STP D: ", get_direction);
-LiquidLine stp_line_time(0, 2, "STP T: ", get_stepper_time);
-LiquidLine stp_line_start(0, 3, "STP Start: ", get_stepper_state_c);
+LiquidLine stp_line_spd(0, 0, str_STP_Spd, get_speed);
+LiquidLine stp_line_dir(0, 1, str_STP_Dir, get_direction);
+LiquidLine stp_line_time(0, 2, str_STP_Time, get_stepper_time);
+LiquidLine stp_line_start(0, 3, str_STP_Start, get_stepper_state_c);
 LiquidScreen stp_screen(stp_line_spd, stp_line_dir, stp_line_time, stp_line_start);
 
-LiquidLine setup_line1(0, 0, ">TYPE: ", get_stp_type);
-LiquidLine setup_line2(0, 1, ">STP/ML: ", get_stp_ml);
+LiquidLine setup_line1(0, 0, str_SET_Type, get_stp_type);
+LiquidLine setup_line2(0, 1, str_SET_Stp_Ml, get_stp_ml);
 LiquidScreen setup_screen(setup_line1, setup_line2, back_line);
 
 LiquidMenu main_menu(lcd);
