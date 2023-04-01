@@ -19,6 +19,8 @@
 
 const char c_On[]  = "On ";
 const char c_Off[]  = "Off";
+const char c_Mixer[]  = "Mxr";
+const char c_Pump[]  = "Pmp";
 
 enum FunctionTypes {
   increase = 1,
@@ -52,15 +54,21 @@ void set_target_to_array(uint32_t target);
 const char* get_rele_state2();
 const char* get_rele_state3();
 const char* get_rele_state4();
+const char* get_stp_type();
+uint32_t get_stp_ml();
 bool set_rele_state_to_array(byte r, bool s);
+void write_config();
+
+void(* resetFunc) (void) = 0;
 
 LiquidLine back_line(10, 1, "<BACK");
 
 LiquidLine main_line1(0, 0, ">STP: ", get_stepper_time);
-LiquidLine main_line2(0, 1, ">Pump: ", get_mixer_pump_state);
-LiquidLine main_line3(0, 2, ">Rele2: ", get_rele_state2);
-LiquidLine main_line4(0, 3, ">Rele3: ", get_rele_state3);
-LiquidLine main_line5(0, 4, ">Rele4: ", get_rele_state4);
+LiquidLine main_line2(0, 1, ">Pmp: ", get_mixer_pump_state);
+LiquidLine main_line3(0, 2, ">R2: ", get_rele_state2);
+LiquidLine main_line4(0, 3, ">R3: ", get_rele_state3);
+LiquidLine main_line5(0, 4, ">R4: ", get_rele_state4);
+LiquidLine main_line6(0, 5, ">SET:");
 LiquidScreen main_screen(main_line1, main_line2);
 
 LiquidLine stp_line_spd(0, 0, ">STP S: ", get_speed);
@@ -69,8 +77,20 @@ LiquidLine stp_line_time(0, 2, ">STP T: ", get_stepper_time);
 LiquidLine stp_line_start(0, 3, ">STP Start: ", get_stepper_state_c);
 LiquidScreen stp_screen(stp_line_spd, stp_line_dir, stp_line_time, stp_line_start);
 
+LiquidLine setup_line1(0, 0, ">TYPE: ", get_stp_type);
+LiquidLine setup_line2(0, 1, ">STP/ML: ", get_stp_ml);
+LiquidScreen setup_screen(setup_line1, setup_line2, back_line);
 
 LiquidMenu main_menu(lcd);
+
+uint32_t get_stp_ml() {
+  return I2CSTPSetup.StepperStepMl;
+}
+
+const char* get_stp_type() {
+  if (I2CSTPSetup.Type == I2CMIXER) return c_Mixer;
+  else return c_Pump;
+}
 
 const char* get_rele_state2() {
   if (bit_is_set(rele_state, 1)) return c_On;
@@ -103,14 +123,42 @@ int get_stepper_state() {
 }
 
 // Used for attaching something to the lines, to make them focusable.
+void change_type() {
+  I2CSTPSetup.Type++;
+  if (I2CSTPSetup.Type > I2CPUMP ) I2CSTPSetup.Type = I2CMIXER;
+}
+
+// Used for attaching something to the lines, to make them focusable.
 void blankFunction() {
   return;
 }
 
 //функция для возврата в основное меню
 void backFunction() {
+  //Если выходим из настроек, их нужно сохранить
+  if (main_menu.get_currentScreen() == &setup_screen) {
+    write_config();
+  }
   main_menu.change_screen(&main_screen);
   main_menu.update();
+}
+
+//инкремент шагов на мл
+void spd_ml_IncFunction() {
+  byte c = m_cnt;
+  if (c < 3) c = 1;
+  else c = c / 3;
+  I2CSTPSetup.StepperStepMl += 1 * multiplier * c;
+}
+
+//декремент шагов на мл
+void spd_ml_DecFunction() {
+  byte c = m_cnt;
+  if (c < 3) c = 1;
+  else c = c / 3;
+  if (I2CSTPSetup.StepperStepMl <= 1 * multiplier * c){
+    I2CSTPSetup.StepperStepMl = 1;
+  } else I2CSTPSetup.StepperStepMl -= 1 * multiplier * c;
 }
 
 //инкремент скорости шаговика
@@ -179,6 +227,7 @@ void menu_init(void) {
   main_screen.add_line(main_line3);
   main_screen.add_line(main_line4);
   main_screen.add_line(main_line5);
+  main_screen.add_line(main_line6);
   main_line3.attach_function(1, blankFunction);
   main_line4.attach_function(1, blankFunction);
   main_line5.attach_function(1, blankFunction);
@@ -197,11 +246,17 @@ void menu_init(void) {
   stp_line_start.attach_function(increase, blankFunction);
   stp_line_start.attach_function(decrease, blankFunction);
 
+  setup_line1.attach_function(increase, change_type);
+  setup_line1.attach_function(decrease, change_type);
+  setup_line2.attach_function(increase, spd_ml_IncFunction);
+  setup_line2.attach_function(decrease, spd_ml_DecFunction);
+
   main_screen.set_displayLineCount(2);
   stp_screen.set_displayLineCount(2);
 
   main_menu.add_screen(main_screen);
   main_menu.add_screen(stp_screen);
+  main_menu.add_screen(setup_screen);
 
   main_menu.update();
   main_menu.set_focusedLine(0);
@@ -264,6 +319,11 @@ void poll_menu(void) {
         updscreen = false;
         set_rele_state_to_array(main_menu.get_focusedLine(), !bit_is_set(rele_state, main_menu.get_focusedLine() - 1));
         main_menu.update();
+      } else if (main_menu.get_focusedLine() == 5) {
+        updscreen = false;
+        main_menu.change_screen(&setup_screen);
+        main_menu.set_focusedLine(0);
+        main_menu.update();
       }
     } else if (main_menu.get_currentScreen() == &stp_screen) {
       if (main_menu.get_focusedLine() == 4) {
@@ -276,6 +336,11 @@ void poll_menu(void) {
         dirFunction();
       }
       else navigate = !navigate;
+    } else if (main_menu.get_currentScreen() == &setup_screen) {
+      if (main_menu.get_focusedLine() == 2) {
+        updscreen = false;
+        backFunction();
+      }
     }
     else navigate = !navigate;
   }
