@@ -63,18 +63,18 @@ void(* resetFunc) (void) = 0;
 
 LiquidLine back_line(10, 1, "<BACK");
 
-LiquidLine main_line1(0, 0, ">STP: ", get_stepper_time);
+LiquidLine main_line1(0, 0, "STP> ", get_stepper_time);
 LiquidLine main_line2(0, 1, ">Pmp: ", get_mixer_pump_state);
 LiquidLine main_line3(0, 2, ">R2: ", get_rele_state2);
 LiquidLine main_line4(0, 3, ">R3: ", get_rele_state3);
 LiquidLine main_line5(0, 4, ">R4: ", get_rele_state4);
-LiquidLine main_line6(0, 5, ">SET:");
+LiquidLine main_line6(0, 5, "SET>");
 LiquidScreen main_screen(main_line1, main_line2);
 
-LiquidLine stp_line_spd(0, 0, ">STP S: ", get_speed);
-LiquidLine stp_line_dir(0, 1, ">STP D: ", get_direction);
-LiquidLine stp_line_time(0, 2, ">STP T: ", get_stepper_time);
-LiquidLine stp_line_start(0, 3, ">STP Start: ", get_stepper_state_c);
+LiquidLine stp_line_spd(0, 0, "STP S: ", get_speed);
+LiquidLine stp_line_dir(0, 1, "STP D: ", get_direction);
+LiquidLine stp_line_time(0, 2, "STP T: ", get_stepper_time);
+LiquidLine stp_line_start(0, 3, "STP Start: ", get_stepper_state_c);
 LiquidScreen stp_screen(stp_line_spd, stp_line_dir, stp_line_time, stp_line_start);
 
 LiquidLine setup_line1(0, 0, ">TYPE: ", get_stp_type);
@@ -156,7 +156,7 @@ void spd_ml_DecFunction() {
   byte c = m_cnt;
   if (c < 3) c = 1;
   else c = c / 3;
-  if (I2CSTPSetup.StepperStepMl <= 1 * multiplier * c){
+  if (I2CSTPSetup.StepperStepMl <= 1 * multiplier * c) {
     I2CSTPSetup.StepperStepMl = 1;
   } else I2CSTPSetup.StepperStepMl -= 1 * multiplier * c;
 }
@@ -231,6 +231,7 @@ void menu_init(void) {
   main_line3.attach_function(1, blankFunction);
   main_line4.attach_function(1, blankFunction);
   main_line5.attach_function(1, blankFunction);
+  main_line6.attach_function(1, blankFunction);
 
   stp_screen.add_line(back_line);
 
@@ -253,6 +254,7 @@ void menu_init(void) {
 
   main_screen.set_displayLineCount(2);
   stp_screen.set_displayLineCount(2);
+  setup_screen.set_displayLineCount(2);
 
   main_menu.add_screen(main_screen);
   main_menu.add_screen(stp_screen);
@@ -341,6 +343,7 @@ void poll_menu(void) {
         updscreen = false;
         backFunction();
       }
+      else navigate = !navigate;
     }
     else navigate = !navigate;
   }
