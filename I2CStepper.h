@@ -57,17 +57,17 @@ enum I2CType {I2CMIXER = 1, I2CPUMP = 2};
 
 
 GStepper< STEPPER2WIRE> stepper(STEPPER_STEPS, STEPPER_STEP, STEPPER_DIR, STEPPER_EN); // объект для работы с шаговым двигателем
-iarduino_I2C_connect I2C2;                            // объект I2C2 для работы c библиотекой iarduino_I2C2_connect
-Encoder encoder(ENC_CLK, ENC_DT, ENC_SW, TYPE2);      // объект для работы с энкодером
-SetupEEPROM I2CSTPSetup;                              // структура для хранения настроек
-byte                 REG_Array[9];                    // массив, данные которого будут доступны мастеру (для чтения/записи) по шине I2C
-uint16_t             set_spd;                         // храним значение установленной скорости
-volatile uint16_t    curr_spd;                        // храним предыдущую установленную скорость
-uint16_t             set_time;                        // храним значение установленного времени
-byte                 set_dir;                         // храним значение направления вращения шаговика
-bool                 stepper_state;                   // храним статус шаговика
-byte                 rele_state;                      // байт для статусов 4 реле
-uint8_t              rele_pin[] = {MIXER_PUMP_PIN, RELE_PIN2, RELE_PIN3, RELE_PIN4};//описание пинов реле
+Encoder               encoder(ENC_CLK, ENC_DT, ENC_SW, TYPE2); // объект для работы с энкодером
+iarduino_I2C_connect  I2C2;                            // объект I2C2 для работы c библиотекой iarduino_I2C2_connect
+SetupEEPROM           I2CSTPSetup;                     // структура для хранения настроек
+byte                  REG_Array[9];                    // массив, данные которого будут доступны мастеру (для чтения/записи) по шине I2C
+uint16_t              set_spd;                         // храним значение установленной скорости
+volatile uint16_t     curr_spd;                        // храним предыдущую установленную скорость
+uint16_t              set_time;                        // храним значение установленного времени
+byte                  set_dir;                         // храним значение направления вращения шаговика
+bool                  stepper_state;                   // храним статус шаговика
+byte                  rele_state;                      // байт для статусов 4 реле
+uint8_t               rele_pin[] = {MIXER_PUMP_PIN, RELE_PIN2, RELE_PIN3, RELE_PIN4}; //описание пинов реле
 
 
 #endif __I2CSTEPPER_H
