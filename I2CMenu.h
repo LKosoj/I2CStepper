@@ -61,6 +61,7 @@ const char c_On[] PROGMEM =  "On ";
 const char c_Off[] PROGMEM = "Off";
 const char c_Mixer[] PROGMEM = "Mixer";
 const char c_Pump[] PROGMEM =  "Pump ";
+const char c_None[] PROGMEM =  "None ";
 
 const char str_BACK[] PROGMEM = "<BACK";
 const char str_STP[] PROGMEM = "STP> ";
@@ -73,9 +74,8 @@ const char str_STP_Spd[] PROGMEM = "STP Spd: ";
 const char str_STP_Dir[] PROGMEM = "STP Dir: ";
 const char str_STP_Time[] PROGMEM = "STP Time: ";
 const char str_STP_Start[] PROGMEM = "STP Start: ";
-const char str_SET_Type[] PROGMEM = ">Type: ";
-const char str_SET_Stp_Ml[] PROGMEM = ">STP/ML: ";
-
+const char str_SET_Type[] PROGMEM = "Type: ";
+const char str_SET_Stp_Ml[] PROGMEM = "STP/ML: ";
 
 
 LiquidLine back_line(10, 1, str_BACK);
@@ -106,7 +106,8 @@ uint32_t get_stp_ml() {
 
 const char* get_stp_type() {
   if (I2CSTPSetup.Type == I2CMIXER) return c_Mixer;
-  else return c_Pump;
+  else if (I2CSTPSetup.Type == I2CPUMP) return c_Pump;
+  else return c_None;
 }
 
 const char* get_rele_state2() {
