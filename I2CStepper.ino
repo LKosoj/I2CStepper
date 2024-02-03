@@ -16,6 +16,11 @@
 
 #include "I2CMenu.h"
 
+#ifndef __I2CStepper_DEBUG
+#define ARDUINOTRACE_ENABLE 0  // Disable all traces
+#endif
+#include <ArduinoTrace.h>
+
 void read_config();
 void write_config();
 
@@ -279,10 +284,10 @@ void loop() {
       start_stepper(false);
     } else {
       if (spd != curr_spd) {
-        stepper.setAcceleration(0);
-        stepper.setRunMode(KEEP_SPEED);
+        //stepper.setAcceleration(0);
+        //stepper.setRunMode(KEEP_SPEED);
         stepper.setMaxSpeed(spd);
-        stepper.setSpeed(spd, false);
+        stepper.setSpeed(spd, true);
         curr_spd = spd;
         set_spd = (float)get_speed_from_array() / STEPPER_STEPS * 60;;
       }
