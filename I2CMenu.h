@@ -189,6 +189,12 @@ void spdIncFunction() {
   if (stepper_state) {
     uint16_t s = get_spd_stp(set_spd);
     set_speed_to_array(s);
+#ifdef __I2CStepper_DEBUG
+    Serial.print(F("Set spd = "));
+    Serial.println(s);
+    Serial.print(F("Get spd from array = "));
+    Serial.println(get_speed_from_array());
+#endif
   }
 }
 
@@ -202,6 +208,12 @@ void spdDecFunction() {
   if (stepper_state) {
     uint16_t s = get_spd_stp(set_spd);
     set_speed_to_array(s);
+#ifdef __I2CStepper_DEBUG
+    Serial.print(F("Set spd = "));
+    Serial.println(s);
+    Serial.print(F("Get spd from array = "));
+    Serial.println(get_speed_from_array());
+#endif
   }
 }
 
@@ -212,6 +224,10 @@ void timeIncFunction() {
   else c = c / 3;
   set_time += 1 * multiplier * c;
   if (set_time > 60000) set_time = 60000;
+
+  uint16_t spd = get_speed_from_array();
+  uint32_t target = (uint32_t)set_time * spd;
+  set_target_to_array(target);
 }
 
 //декремент времени работы шаговика
@@ -221,6 +237,10 @@ void timeDecFunction() {
   else c = c / 3;
   if (set_time <= 1 * multiplier * c) set_time = 0;
   else set_time -= 1 * multiplier * c;
+
+  uint16_t spd = get_speed_from_array();
+  uint32_t target = (uint32_t)set_time * spd;
+  set_target_to_array(target);
 }
 
 //изменение направления вращения шаговика
