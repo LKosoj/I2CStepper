@@ -4,6 +4,7 @@
 
 // Подключаем библиотеки:
 #include <Arduino.h>
+#include <avr/pgmspace.h>
 #include <Wire.h>                                     // подключаем библиотеку для работы с шиной I2C
 #include <EEPROM.h>
 #include <iarduino_I2C_connect.h>                     // подключаем библиотеку для соединения arduino по шине I2C
@@ -57,6 +58,11 @@ void setup() {
   Timer1.attachInterrupt(stp_tick);
 
   Serial.println("Ready");
+#ifdef __I2CStepper_DEBUG
+  set_spd = 490;
+  set_time = 2000;
+  last_set_time = set_time;
+#endif
 }
 
 void stp_tick(void)
@@ -65,9 +71,9 @@ void stp_tick(void)
 }
 
 //возвращаем время или миллилитры, оставшиеся до конца работы шаговика для отображения на экране
-float get_stepper_time(void) {
+uint32_t get_stepper_time(void) {
   if (set_time == 0 || stepper_state) set_time = get_stepper_time_from_array();
-  return (uint16_t)set_time;
+  return (uint32_t)set_time;
 }
 
 //возвращаем время или миллилитры, оставшиеся до конца работы шаговика
@@ -111,22 +117,22 @@ uint16_t get_spd_stp(uint16_t spd) {
 }
 
 //возвращаем скорость в оборотах/мин или литры в час
-float get_speed(void) {
+uint32_t get_speed(void) {
   if (I2CSTPSetup.Type == I2CMIXER) {
     //в об/мин
     if (set_spd == 0) set_spd = get_speed_from_array() / STEPPER_STEPS * 60;
   } else if (I2CSTPSetup.Type == I2CPUMP) {
     //в литрах в час
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     if (set_spd == 0) set_spd = get_speed_from_array() / STEPPER_STEPS * 60;
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   }
   return set_spd;
 }
@@ -193,12 +199,14 @@ bool set_rele_state_to_array(byte r, bool s) {
   bitWrite(REG_Array[7], r - 1, s);
   bitWrite(rele_state, r - 1, s);
   digitalWrite(rele_pin[r - 1], s);
-  Serial.println("======================");
-  Serial.print("Toggle rele ");
+#ifdef __I2CStepper_DEBUG
+  Serial.println(F("======================"));
+  Serial.print(F("Toggle rele "));
   Serial.print(r);
-  Serial.print("; set ");
+  Serial.print(F("; set "));
   Serial.println(s);
-  Serial.println("======================");
+  Serial.println(F("======================"));
+#endif
   return s;
 }
 
@@ -215,8 +223,8 @@ void start_stepper(bool from_int) {
     set_speed_to_array(spd);
     set_direction_to_array(dir);
     set_target_to_array(target);
-    set_spd = 0;
-    set_time = 0;
+    //set_spd = 0;
+    //set_time = 0;
   } else {
     target = get_target_from_array();
     spd = get_speed_from_array();
@@ -225,11 +233,13 @@ void start_stepper(bool from_int) {
 
   if (spd == 0 || target == 0) return;
 
-  Serial.println("======================");
-  Serial.println("START STP");
+#ifdef __I2CStepper_DEBUG
+  Serial.println(F("======================"));
+  Serial.println(F("START STP"));
   Serial.println(spd);
   Serial.println(target);
-  Serial.println("======================");
+  Serial.println(F("======================"));
+#endif
 
   stepper.setRunMode(FOLLOW_POS);
   stepper.setAcceleration(STEPPER_STEPS);
@@ -253,13 +263,17 @@ void stop_stepper() {
   stepper.brake();
   stepper.disable();
   stepper.setCurrent(0);
-  Serial.println("======================");
-  Serial.println("FINISH STP");
-  Serial.println("======================");
+
+#ifdef __I2CStepper_DEBUG
+  Serial.println(F("======================"));
+  Serial.println(F("FINISH STP"));
+  Serial.println(F("======================"));
+#endif
 }
 
 //основной цикл
 void loop() {
+  //TRACE();
   uint32_t target;
   uint16_t spd;
 
@@ -279,24 +293,57 @@ void loop() {
 
   stepper_state = stepper.getState();
 
+  //шаговик крутит
   if (target > 0 && spd > 0) {
     if (!stepper_state) {
+      //если в массиве указаны параметры скорости и времени и шаговик не крутит - значит пришли значения от Самовара, запустим
       start_stepper(false);
     } else {
+      //шаговик крутится, но текущая скорость отличается от скорости в массиве, установим заданную в массиве
       if (spd != curr_spd) {
-        //stepper.setAcceleration(0);
-        //stepper.setRunMode(KEEP_SPEED);
         stepper.setMaxSpeed(spd);
         stepper.setSpeed(spd, true);
         curr_spd = spd;
         set_spd = (float)get_speed_from_array() / STEPPER_STEPS * 60;;
+#ifdef __I2CStepper_DEBUG
+        Serial.print(F("On changed SSSSSetSpd = "));
+        Serial.println(set_spd);
+        Serial.print(F("Changed spd = "));
+        Serial.println(spd);
+#endif
       }
     }
-    uint32_t crnt_trg = (uint32_t)stepper.getTarget() - (uint32_t)stepper.getCurrent();
-    if (target != crnt_trg) {
-      target = crnt_trg;
-      set_target_to_array(target);
+
+    //если предыдущее оставшееся время отличается от текущего оставшегося времени больше, чем на 1 секунду в любую сторону,
+    //значит это значение пришло от Самовара и нужно синхронизироваться с ним
+    uint16_t set_time = get_stepper_time();
+    if (abs((float)set_time - (float)last_set_time) > 1) {
+      target = (uint32_t)set_time * spd;
+      byte savePrescale;
+      //остановим первый таймер
+      savePrescale = TCCR1B & (0b111 << CS10);
+      TCCR1B &= ~(0b111 << CS10);
+      stepper.setTarget((long)target + stepper.getCurrent());
+      //продолжим первый таймер
+      TCCR1B |= savePrescale;
+
+#ifdef __I2CStepper_DEBUG
+      Serial.print(F("Time delta = "));
+      Serial.print(abs((float)set_time - (float)last_set_time));
+      Serial.print(F(" . Changed set_time = "));
+      Serial.print(set_time);
+      Serial.print(F(" . Last set_time = "));
+      Serial.println(last_set_time);
+#endif
     }
+    last_set_time = set_time;
+
+    uint32_t crnt_trg = (uint32_t)stepper.getTarget() - (uint32_t)stepper.getCurrent();
+    //синхронизируем текущее положение шаговика с массивом для передачи данных Самовару
+    target = crnt_trg;
+    set_target_to_array(target);
+    //stepper.setTarget((long)target);
+    //}
     if (target == 0) {
       stop_stepper();
     }

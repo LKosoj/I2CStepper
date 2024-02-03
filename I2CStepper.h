@@ -1,9 +1,9 @@
 #ifndef __I2CSTEPPER_H
 #define __I2CSTEPPER_H
 
-#define I2CSTEPPER_VERSION 0.3
+#define I2CSTEPPER_VERSION 0.2
 
-#define __I2CStepper_DEBUG
+//#define __I2CStepper_DEBUG
 
 // Пины для I2C Master - подключение экрана и потенциально других устройств
 // SDA_PIN 0 //A0
@@ -66,6 +66,7 @@ byte                  REG_Array[9];                    // массив, данн
 uint16_t              set_spd;                         // храним значение установленной скорости
 volatile uint16_t     curr_spd;                        // храним предыдущую установленную скорость
 uint16_t              set_time;                        // храним значение установленного времени
+uint16_t              last_set_time;                   // храним предудущее значение установленного времени
 byte                  set_dir;                         // храним значение направления вращения шаговика
 bool                  stepper_state;                   // храним статус шаговика
 byte                  rele_state;                      // байт для статусов 4 реле

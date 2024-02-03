@@ -36,9 +36,9 @@ int get_stepper_state();
 const char* get_stepper_state_c();
 const char* get_mixer_pump_state();
 bool set_mixer_pump_state(bool state);
-float get_speed(void);
+uint32_t get_speed(void);
 byte get_direction(void);
-float get_stepper_time(void);
+uint32_t get_stepper_time(void);
 void start_stepper(bool from_int);
 void stop_stepper();
 uint32_t get_target_from_array(void);
@@ -63,22 +63,21 @@ const char c_Mixer[] PROGMEM = "Mixer";
 const char c_Pump[] PROGMEM =  "Pump ";
 const char c_None[] PROGMEM =  "None ";
 
-const char str_BACK[] PROGMEM = "<BACK";
-const char str_STP[] PROGMEM = "STP> ";
-const char str_Pmp[] PROGMEM = ">Pump: ";
-const char str_R2[] PROGMEM = ">Rele2: ";
-const char str_R3[] PROGMEM = ">Rele3: ";
-const char str_R4[] PROGMEM = ">Rele4: ";
-const char str_SET[] PROGMEM = "SETUP>";
-const char str_STP_Spd[] PROGMEM = "STP Spd: ";
-const char str_STP_Dir[] PROGMEM = "STP Dir: ";
-const char str_STP_Time[] PROGMEM = "STP Time: ";
-const char str_STP_Start[] PROGMEM = "STP Start: ";
-const char str_SET_Type[] PROGMEM = "Type: ";
-const char str_SET_Stp_Ml[] PROGMEM = "STP/ML: ";
+const char str_BACK[] = "<BACK";
+const char str_STP[]  = "STP> ";
+const char str_Pmp[]  = ">Pump: ";
+const char str_R2[]  = ">Rele2: ";
+const char str_R3[]  = ">Rele3: ";
+const char str_R4[]  = ">Rele4: ";
+const char str_SET[]  = "SETUP>";
+const char str_STP_Spd[]  = "STP Spd: ";
+const char str_STP_Dir[]  = "STP Dir: ";
+const char str_STP_Time[]  = "STP Time: ";
+const char str_STP_Start[]  = "STP Start: ";
+const char str_SET_Type[]  = "Type: ";
+const char str_SET_Stp_Ml[]  = "STP/ML: ";
 
-
-LiquidLine back_line(10, 1, str_BACK);
+LiquidLine back_line(10, 6, str_BACK);
 
 LiquidLine main_line1(0, 0, str_STP, get_stepper_time);
 LiquidLine main_line2(0, 1, str_Pmp, get_mixer_pump_state);
@@ -104,35 +103,45 @@ uint32_t get_stp_ml() {
   return I2CSTPSetup.StepperStepMl;
 }
 
+const char* get_c_ptr(const char* p_str) {
+  static char buf_g[6];
+  strcpy_P(buf_g, p_str);
+  return  buf_g;
+}
+
 const char* get_stp_type() {
-  if (I2CSTPSetup.Type == I2CMIXER) return c_Mixer;
-  else if (I2CSTPSetup.Type == I2CPUMP) return c_Pump;
-  else return c_None;
+  if (I2CSTPSetup.Type == I2CMIXER) return get_c_ptr(c_Mixer);
+  else if (I2CSTPSetup.Type == I2CPUMP) return get_c_ptr(c_Pump);
+  else return get_c_ptr(c_None);
 }
 
 const char* get_rele_state2() {
-  if (bit_is_set(rele_state, 1)) return c_On;
-  else return c_Off;
+  if (bit_is_set(rele_state, 1)) {
+    return get_c_ptr(c_On);
+  }
+  else {
+    return get_c_ptr(c_Off);
+  }
 }
 
 const char* get_rele_state3() {
-  if (bit_is_set(rele_state, 2)) return c_On;
-  else return c_Off;
+  if (bit_is_set(rele_state, 2)) return get_c_ptr(c_On);
+  else return get_c_ptr(c_Off);
 }
 
 const char* get_rele_state4() {
-  if (bit_is_set(rele_state, 3)) return c_On;
-  else return c_Off;
+  if (bit_is_set(rele_state, 3)) return get_c_ptr(c_On);
+  else return get_c_ptr(c_Off);
 }
 
 const char* get_mixer_pump_state() {
-  if (bit_is_set(rele_state, 0)) return c_On;
-  else return c_Off;
+  if (bit_is_set(rele_state, 0)) return get_c_ptr(c_On);
+  else return get_c_ptr(c_Off);
 }
 
 const char* get_stepper_state_c() {
-  if (stepper_state) return c_On;
-  else return c_Off;
+  if (stepper_state) return get_c_ptr(c_On);
+  else return get_c_ptr(c_Off);
 }
 
 int get_stepper_state() {
@@ -182,65 +191,109 @@ void spd_ml_DecFunction() {
 //инкремент скорости шаговика
 void spdIncFunction() {
   byte c = m_cnt;
+  uint32_t s;
   if (c < 3) c = 1;
   else c = c / 3;
   set_spd += 1 * multiplier * c;
   if (set_spd > STEPPER_MAX_SPEED) set_spd = STEPPER_MAX_SPEED;
   if (stepper_state) {
-    uint16_t s = get_spd_stp(set_spd);
+    s = get_spd_stp(set_spd);
     set_speed_to_array(s);
-#ifdef __I2CStepper_DEBUG
-    Serial.print(F("Set spd = "));
-    Serial.println(s);
-    Serial.print(F("Get spd from array = "));
-    Serial.println(get_speed_from_array());
-#endif
   }
+#ifdef __I2CStepper_DEBUG
+  Serial.print(F("SSSSSetSpd = "));
+  Serial.println(set_spd);
+  Serial.print(F("Set spd = "));
+  Serial.println(s);
+  Serial.print(F("Get spd from array = "));
+  Serial.println(get_speed_from_array());
+#endif
 }
 
 //декремент скорости шаговика
 void spdDecFunction() {
   byte c = m_cnt;
+  uint32_t s;
   if (c < 3) c = 1;
   else c = c / 3;
   if (set_spd <= 1 * multiplier * c) set_spd = 1;
   else set_spd -= 1 * multiplier * c;
   if (stepper_state) {
-    uint16_t s = get_spd_stp(set_spd);
+    s = get_spd_stp(set_spd);
     set_speed_to_array(s);
-#ifdef __I2CStepper_DEBUG
-    Serial.print(F("Set spd = "));
-    Serial.println(s);
-    Serial.print(F("Get spd from array = "));
-    Serial.println(get_speed_from_array());
-#endif
   }
+#ifdef __I2CStepper_DEBUG
+  Serial.print(F("SSSSSetSpd = "));
+  Serial.println(set_spd);
+  Serial.print(F("Set spd = "));
+  Serial.println(s);
+  Serial.print(F("Get spd from array = "));
+  Serial.println(get_speed_from_array());
+#endif
 }
 
 //инкремент времени работы шаговика
 void timeIncFunction() {
   byte c = m_cnt;
+  uint32_t target;
   if (c < 3) c = 1;
   else c = c / 3;
   set_time += 1 * multiplier * c;
   if (set_time > 60000) set_time = 60000;
+  last_set_time = set_time;
 
-  uint16_t spd = get_speed_from_array();
-  uint32_t target = (uint32_t)set_time * spd;
-  set_target_to_array(target);
+  if (stepper_state) {
+    uint16_t spd = get_speed_from_array();
+    target = (uint32_t)set_time * spd;
+    set_target_to_array(target);
+    byte savePrescale;
+    //остановим первый таймер
+    savePrescale = TCCR1B & (0b111 << CS10);
+    TCCR1B &= ~(0b111 << CS10);
+    stepper.setTarget((long)target + stepper.getCurrent());
+    //продолжим первый таймер
+    TCCR1B |= savePrescale;
+  }
+#ifdef __I2CStepper_DEBUG
+  Serial.print(F("Set time = "));
+  Serial.println(set_time);
+  Serial.print(F("Set target = "));
+  Serial.println(target);
+  Serial.print(F("Get target from array = "));
+  Serial.println(get_target_from_array());
+#endif
 }
 
 //декремент времени работы шаговика
 void timeDecFunction() {
   byte c = m_cnt;
+  uint32_t target;
   if (c < 3) c = 1;
   else c = c / 3;
   if (set_time <= 1 * multiplier * c) set_time = 0;
   else set_time -= 1 * multiplier * c;
+  last_set_time = set_time;
 
-  uint16_t spd = get_speed_from_array();
-  uint32_t target = (uint32_t)set_time * spd;
-  set_target_to_array(target);
+  if (stepper_state) {
+    uint16_t spd = get_speed_from_array();
+    target = (uint32_t)set_time * spd;
+    set_target_to_array(target);
+    byte savePrescale;
+    //остановим первый таймер
+    savePrescale = TCCR1B & (0b111 << CS10);
+    TCCR1B &= ~(0b111 << CS10);
+    stepper.setTarget((long)target + stepper.getCurrent());
+    //продолжим первый таймер
+    TCCR1B |= savePrescale;
+  }
+#ifdef __I2CStepper_DEBUG
+  Serial.print(F("Set time = "));
+  Serial.println(set_time);
+  Serial.print(F("Set target = "));
+  Serial.println(target);
+  Serial.print(F("Get target from array = "));
+  Serial.println(get_target_from_array());
+#endif
 }
 
 //изменение направления вращения шаговика
@@ -298,6 +351,7 @@ void menu_init(void) {
   main_menu.add_screen(stp_screen);
   main_menu.add_screen(setup_screen);
 
+  main_menu.change_screen(&main_screen);
   main_menu.update();
   main_menu.set_focusedLine(0);
 }
