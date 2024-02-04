@@ -84,7 +84,7 @@ uint16_t get_stepper_time_from_array(void) {
     float s = get_speed_from_array();
     if (s == 0) return 0;
     t = (float)get_target_from_array() / s;
-  } else if (I2CSTPSetup.Type == I2CMIXER) {
+  } else if (I2CSTPSetup.Type == I2CPUMP) {
     //если миллилитры
     t = (float)get_target_from_array() / I2CSTPSetup.StepperStepMl;
   }
@@ -230,6 +230,7 @@ void start_stepper(bool from_int) {
     spd = get_speed_from_array();
     dir = get_direction_from_array();
   }
+  last_dir = dir;
 
   if (spd == 0 || target == 0) return;
 
@@ -290,7 +291,7 @@ void loop() {
   //обрабатываем измененения статуса шаговика
   target = get_target_from_array();
   spd = get_speed_from_array();
-
+  byte dir = get_direction_from_array();
   stepper_state = stepper.getState();
 
   //шаговик крутит
@@ -314,10 +315,20 @@ void loop() {
       }
     }
 
-    //если предыдущее оставшееся время отличается от текущего оставшегося времени больше, чем на 1 секунду в любую сторону,
+    //если новое значение направления отличается от предыдущего - останавливаем шаговик и начинаем крутить в другую сторону
+    if (dir != last_dir) {
+      stepper.brake();
+      stepper.reverse(dir);
+      last_dir = dir;
+      stepper.enable();
+      stepper.setMaxSpeed(spd);
+      stepper.setSpeed(spd, true);
+    }
+
+    //если режим - миксер и предыдущее оставшееся время отличается от текущего оставшегося времени больше, чем на 1 секунду в любую сторону,
     //значит это значение пришло от Самовара и нужно синхронизироваться с ним
     uint16_t set_time = get_stepper_time();
-    if (abs((float)set_time - (float)last_set_time) > 1) {
+    if (abs((float)set_time - (float)last_set_time) > 1 && I2CSTPSetup.Type == I2CMIXER) {
       target = (uint32_t)set_time * spd;
       byte savePrescale;
       //остановим первый таймер
@@ -365,6 +376,13 @@ void read_config() {
   if (I2CSTPSetup.StepperStepMl < 100) {
     I2CSTPSetup.StepperStepMl = 100;
     write_config();
+  }
+
+  //устанавливаем в меню нужный тип изменерения
+  if (I2CSTPSetup.Type == I2CMIXER) {
+    str_STP_Measure = str_STP_Time;
+  } else if (I2CSTPSetup.Type == I2CPUMP) {
+    str_STP_Measure = str_STP_Ml;
   }
 }
 
