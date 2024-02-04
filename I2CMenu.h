@@ -32,6 +32,7 @@ bool navigate;
 byte oldS;
 
 
+void set_direction_to_array(byte dir);
 int get_stepper_state();
 const char* get_stepper_state_c();
 const char* get_mixer_pump_state();
@@ -73,9 +74,11 @@ const char str_SET[]  = "SETUP>";
 const char str_STP_Spd[]  = "STP Spd: ";
 const char str_STP_Dir[]  = "STP Dir: ";
 const char str_STP_Time[]  = "STP Time: ";
+const char str_STP_Ml[]  = "STP ML: ";
 const char str_STP_Start[]  = "STP Start: ";
 const char str_SET_Type[]  = "Type: ";
 const char str_SET_Stp_Ml[]  = "STP/ML: ";
+char* str_STP_Measure = str_STP_Time;
 
 LiquidLine back_line(10, 6, str_BACK);
 
@@ -89,7 +92,7 @@ LiquidScreen main_screen(main_line1, main_line2);
 
 LiquidLine stp_line_spd(0, 0, str_STP_Spd, get_speed);
 LiquidLine stp_line_dir(0, 1, str_STP_Dir, get_direction);
-LiquidLine stp_line_time(0, 2, str_STP_Time, get_stepper_time);
+LiquidLine stp_line_time(0, 2, str_STP_Measure, get_stepper_time);
 LiquidLine stp_line_start(0, 3, str_STP_Start, get_stepper_state_c);
 LiquidScreen stp_screen(stp_line_spd, stp_line_dir, stp_line_time, stp_line_start);
 
@@ -239,7 +242,7 @@ void timeIncFunction() {
   if (c < 3) c = 1;
   else c = c / 3;
   set_time += 1 * multiplier * c;
-  if (set_time > 60000) set_time = 60000;
+  if (set_time > 100000) set_time = 100000;
   last_set_time = set_time;
 
   if (stepper_state) {
@@ -299,7 +302,7 @@ void timeDecFunction() {
 //изменение направления вращения шаговика
 void dirFunction() {
   set_dir = !set_dir;
-  stepper.reverse(set_dir);
+  set_direction_to_array(set_dir);
 }
 
 //инициализация меню
@@ -443,6 +446,12 @@ void poll_menu(void) {
   if (currS != oldS) {
     if (updscreen) main_menu.softUpdate();
     oldS = millis() / 1000;
+#ifdef __I2CStepper_DEBUG
+    Serial.print(F("spd = "));
+    Serial.print(get_speed_from_array());
+    Serial.print(F("; target = "));
+    Serial.println(get_target_from_array());
+#endif
   }
 }
 #endif
