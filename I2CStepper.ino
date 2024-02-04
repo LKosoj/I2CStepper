@@ -58,9 +58,9 @@ void setup() {
   Timer1.initialize(40);                              // инициализируем таймер для упарвления шаговиком
   Timer1.attachInterrupt(stp_tick);
 
-  if (I2CSTPSetup.Type == I2CMIXER){
+  if (I2CSTPSetup.Type == I2CMIXER) {
     Serial.print(F("Mixer "));
-  } else if (I2CSTPSetup.Type == I2CPUMP){
+  } else if (I2CSTPSetup.Type == I2CPUMP) {
     Serial.print(F("Pump "));
   }
   Serial.println(F("ready"));
