@@ -19,7 +19,7 @@
 #define STEPPER_EN 5
 
 // Настройки для шагового двигателя
-#define STEPPER_MS 8
+#define STEPPER_MS 2
 #define STEPPER_STEPS (200 * STEPPER_MS) //количество шагов, 200 x MS
 #define STEPPER_MAX_SPEED 6000
 

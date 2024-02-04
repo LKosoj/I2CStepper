@@ -39,7 +39,6 @@ void setup() {
 
   read_config();
 
-  Wire.begin(I2CSTPSetup.Type);                       // инициируем подключение к шине I2C в качестве ведомого (slave) устройства, с указанием своего адреса на шине.
   Wire2.begin();                                      // инициируем подключение к шине I2C в качестве мастера
   I2C2.begin(REG_Array);                              // инициируем возможность чтения/записи данных по шине I2C, из/в указываемый массив
   stepper.setRunMode(FOLLOW_POS);
@@ -113,26 +112,21 @@ void set_target_to_array(uint32_t target) {
 
 //возвращаем скрость в шагах в секунду из скорости в оборотах/мин
 uint16_t get_spd_stp(uint16_t spd) {
-  return (float)spd * STEPPER_STEPS / 60;
+  if (I2CSTPSetup.Type == I2CMIXER) {
+    return (float)spd * STEPPER_STEPS / 60;
+  } else if (I2CSTPSetup.Type == I2CPUMP) {
+    return (float)spd * I2CSTPSetup.StepperStepMl / 3600;
+  }
 }
 
 //возвращаем скорость в оборотах/мин или литры в час
 uint32_t get_speed(void) {
   if (I2CSTPSetup.Type == I2CMIXER) {
     //в об/мин
-    if (set_spd == 0) set_spd = get_speed_from_array() / STEPPER_STEPS * 60;
+    if (set_spd == 0 || stepper_state) set_spd = get_speed_from_array() / STEPPER_STEPS * 60;
   } else if (I2CSTPSetup.Type == I2CPUMP) {
-    //в литрах в час
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    if (set_spd == 0) set_spd = get_speed_from_array() / STEPPER_STEPS * 60;
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //в миллилитрах в час
+    if (set_spd == 0 || stepper_state) set_spd = (float)get_speed_from_array() / I2CSTPSetup.StepperStepMl * 3600;
   }
   return set_spd;
 }
@@ -218,13 +212,16 @@ void start_stepper(bool from_int) {
 
   if (from_int) {
     spd = get_spd_stp(set_spd);
-    target = (uint32_t)set_time * spd;
+    if (I2CSTPSetup.Type == I2CMIXER) {
+      target = (uint32_t)set_time * spd;
+    }
+    if (I2CSTPSetup.Type == I2CPUMP) {
+      target = (uint32_t)set_time * I2CSTPSetup.StepperStepMl;
+    }
     dir = set_dir;
     set_speed_to_array(spd);
     set_direction_to_array(dir);
     set_target_to_array(target);
-    //set_spd = 0;
-    //set_time = 0;
   } else {
     target = get_target_from_array();
     spd = get_speed_from_array();
@@ -305,7 +302,7 @@ void loop() {
         stepper.setMaxSpeed(spd);
         stepper.setSpeed(spd, true);
         curr_spd = spd;
-        set_spd = (float)get_speed_from_array() / STEPPER_STEPS * 60;;
+        set_spd = get_speed();
 #ifdef __I2CStepper_DEBUG
         Serial.print(F("On changed SSSSSetSpd = "));
         Serial.println(set_spd);
@@ -328,7 +325,7 @@ void loop() {
     //если режим - миксер и предыдущее оставшееся время отличается от текущего оставшегося времени больше, чем на 1 секунду в любую сторону,
     //значит это значение пришло от Самовара и нужно синхронизироваться с ним
     uint16_t set_time = get_stepper_time();
-    if (abs((float)set_time - (float)last_set_time) > 1 && I2CSTPSetup.Type == I2CMIXER) {
+    if (I2CSTPSetup.Type == I2CMIXER && abs((float)set_time - (float)last_set_time) > 1) {
       target = (uint32_t)set_time * spd;
       byte savePrescale;
       //остановим первый таймер
@@ -337,15 +334,16 @@ void loop() {
       stepper.setTarget((long)target + stepper.getCurrent());
       //продолжим первый таймер
       TCCR1B |= savePrescale;
-
-#ifdef __I2CStepper_DEBUG
-      Serial.print(F("Time delta = "));
-      Serial.print(abs((float)set_time - (float)last_set_time));
-      Serial.print(F(" . Changed set_time = "));
-      Serial.print(set_time);
-      Serial.print(F(" . Last set_time = "));
-      Serial.println(last_set_time);
-#endif
+    }
+    if (I2CSTPSetup.Type == I2CPUMP && abs((float)set_time - (float)last_set_time) > 1) {
+      target = (uint32_t)set_time * I2CSTPSetup.StepperStepMl;
+      byte savePrescale;
+      //остановим первый таймер
+      savePrescale = TCCR1B & (0b111 << CS10);
+      TCCR1B &= ~(0b111 << CS10);
+      stepper.setTarget((long)target + stepper.getCurrent());
+      //продолжим первый таймер
+      TCCR1B |= savePrescale;
     }
     last_set_time = set_time;
 
@@ -378,6 +376,7 @@ void read_config() {
     write_config();
   }
 
+  Wire.begin(I2CSTPSetup.Type);                       // инициируем подключение к шине I2C в качестве ведомого (slave) устройства, с указанием своего адреса на шине.
   //устанавливаем в меню нужный тип изменерения
   if (I2CSTPSetup.Type == I2CMIXER) {
     str_STP_Measure = str_STP_Time;

@@ -247,7 +247,12 @@ void timeIncFunction() {
 
   if (stepper_state) {
     uint16_t spd = get_speed_from_array();
-    target = (uint32_t)set_time * spd;
+    if (I2CSTPSetup.Type == I2CMIXER) {
+      target = (uint32_t)set_time * spd;
+    }
+    if (I2CSTPSetup.Type == I2CPUMP) {
+      target = (uint32_t)set_time * I2CSTPSetup.StepperStepMl;
+    }
     set_target_to_array(target);
     byte savePrescale;
     //остановим первый таймер
@@ -279,7 +284,12 @@ void timeDecFunction() {
 
   if (stepper_state) {
     uint16_t spd = get_speed_from_array();
-    target = (uint32_t)set_time * spd;
+    if (I2CSTPSetup.Type == I2CMIXER) {
+      target = (uint32_t)set_time * spd;
+    }
+    if (I2CSTPSetup.Type == I2CPUMP) {
+      target = (uint32_t)set_time * I2CSTPSetup.StepperStepMl;
+    }
     set_target_to_array(target);
     byte savePrescale;
     //остановим первый таймер
