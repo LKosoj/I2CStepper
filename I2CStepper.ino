@@ -1,3 +1,5 @@
+//TODO вынести создание строк меню в функцию инициализации и убрать строки в PROGMEM
+
 #define LIQUIDMENU_LIBRARY LiquidCrystal_I2C2_LIBRARY
 #define DisplayClass LiquidCrystal_I2C2
 #define DRIVER_STEP_TIME 5
@@ -56,7 +58,12 @@ void setup() {
   Timer1.initialize(40);                              // инициализируем таймер для упарвления шаговиком
   Timer1.attachInterrupt(stp_tick);
 
-  Serial.println("Ready");
+  if (I2CSTPSetup.Type == I2CMIXER){
+    Serial.print(F("Mixer "));
+  } else if (I2CSTPSetup.Type == I2CPUMP){
+    Serial.print(F("Pump "));
+  }
+  Serial.println(F("ready"));
 #ifdef __I2CStepper_DEBUG
   set_spd = 490;
   set_time = 2000;
@@ -85,7 +92,7 @@ uint16_t get_stepper_time_from_array(void) {
     t = (float)get_target_from_array() / s;
   } else if (I2CSTPSetup.Type == I2CPUMP) {
     //если миллилитры
-    t = (float)get_target_from_array() / I2CSTPSetup.StepperStepMl;
+    t = (float)get_target_from_array() * 100 / I2CSTPSetup.StepperStepMl;
   }
   return t;
 }
@@ -112,21 +119,23 @@ void set_target_to_array(uint32_t target) {
 
 //возвращаем скрость в шагах в секунду из скорости в оборотах/мин
 uint16_t get_spd_stp(uint16_t spd) {
+  float s;
   if (I2CSTPSetup.Type == I2CMIXER) {
-    return (float)spd * STEPPER_STEPS / 60;
+    s = (float)spd * STEPPER_STEPS / 60;
   } else if (I2CSTPSetup.Type == I2CPUMP) {
-    return (float)spd * I2CSTPSetup.StepperStepMl / 3600;
+    s = (float)spd * I2CSTPSetup.StepperStepMl / 3600;
   }
+  return s;
 }
 
 //возвращаем скорость в оборотах/мин или литры в час
 uint32_t get_speed(void) {
   if (I2CSTPSetup.Type == I2CMIXER) {
     //в об/мин
-    if (set_spd == 0 || stepper_state) set_spd = get_speed_from_array() / STEPPER_STEPS * 60;
+    if (set_spd == 0 || stepper_state) set_spd = ((float)get_speed_from_array() / STEPPER_STEPS * 60 + 0.4);
   } else if (I2CSTPSetup.Type == I2CPUMP) {
     //в миллилитрах в час
-    if (set_spd == 0 || stepper_state) set_spd = (float)get_speed_from_array() / I2CSTPSetup.StepperStepMl * 3600;
+    if (set_spd == 0 || stepper_state) set_spd = (float)get_speed_from_array() * 3600 / I2CSTPSetup.StepperStepMl;
   }
   return set_spd;
 }
@@ -216,7 +225,7 @@ void start_stepper(bool from_int) {
       target = (uint32_t)set_time * spd;
     }
     if (I2CSTPSetup.Type == I2CPUMP) {
-      target = (uint32_t)set_time * I2CSTPSetup.StepperStepMl;
+      target = (uint32_t)set_time * I2CSTPSetup.StepperStepMl / 100;
     }
     dir = set_dir;
     set_speed_to_array(spd);
@@ -336,7 +345,7 @@ void loop() {
       TCCR1B |= savePrescale;
     }
     if (I2CSTPSetup.Type == I2CPUMP && abs((float)set_time - (float)last_set_time) > 1) {
-      target = (uint32_t)set_time * I2CSTPSetup.StepperStepMl;
+      target = (uint32_t)set_time * I2CSTPSetup.StepperStepMl / 100;
       byte savePrescale;
       //остановим первый таймер
       savePrescale = TCCR1B & (0b111 << CS10);
@@ -368,7 +377,7 @@ void read_config() {
 
   if (isnan(I2CSTPSetup.Type)) {
     I2CSTPSetup.Type = I2CMIXER;
-    I2CSTPSetup.StepperStepMl = 10000;
+    I2CSTPSetup.StepperStepMl = 4500;
     write_config();
   }
   if (I2CSTPSetup.StepperStepMl < 100) {
@@ -383,6 +392,7 @@ void read_config() {
   } else if (I2CSTPSetup.Type == I2CPUMP) {
     str_STP_Measure = str_STP_Ml;
   }
+  main_menu.update();
 }
 
 void write_config() {

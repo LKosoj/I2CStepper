@@ -12,6 +12,7 @@
 
 #include <LiquidCrystal_I2C2.h>
 #include <LiquidMenu.h>
+#include <ArduinoTrace.h>
 
 #define LCD_ADDRESS 0x27
 #define LCD_COLUMNS 16
@@ -251,7 +252,7 @@ void timeIncFunction() {
       target = (uint32_t)set_time * spd;
     }
     if (I2CSTPSetup.Type == I2CPUMP) {
-      target = (uint32_t)set_time * I2CSTPSetup.StepperStepMl;
+      target = (uint32_t)set_time * I2CSTPSetup.StepperStepMl / 100;
     }
     set_target_to_array(target);
     byte savePrescale;
@@ -454,10 +455,18 @@ void poll_menu(void) {
   }
   byte currS = millis() / 1000;
   if (currS != oldS) {
-    if (updscreen) main_menu.softUpdate();
+    if (((currS / 10) * 10) == currS) {
+      main_menu.update();
+    } else if (updscreen) {
+      main_menu.softUpdate();
+    }
     oldS = millis() / 1000;
 #ifdef __I2CStepper_DEBUG
-    Serial.print(F("spd = "));
+    Serial.print(F("set_time = "));
+    Serial.print(get_stepper_time());
+    Serial.print(F("; set_spd = "));
+    Serial.print(get_speed());
+    Serial.print(F("; spd = "));
     Serial.print(get_speed_from_array());
     Serial.print(F("; target = "));
     Serial.println(get_target_from_array());
