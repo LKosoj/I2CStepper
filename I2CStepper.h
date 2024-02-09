@@ -1,9 +1,9 @@
 #ifndef __I2CSTEPPER_H
 #define __I2CSTEPPER_H
 
-#define I2CSTEPPER_VERSION 0.2
+#define I2CSTEPPER_VERSION 0.3
 
-//#define __I2CStepper_DEBUG
+#define __I2CStepper_DEBUG
 
 // Пины для I2C Master - подключение экрана и потенциально других устройств
 // SDA_PIN 0 //A0
@@ -58,7 +58,10 @@ struct SetupEEPROM {
 enum I2CType {I2CMIXER = 1, I2CPUMP = 2};
 
 
-GStepper< STEPPER2WIRE> stepper(STEPPER_STEPS, STEPPER_STEP, STEPPER_DIR, STEPPER_EN); // объект для работы с шаговым двигателем
+//#define GS_FAST_PROFILE 10
+#include <GyverStepper2.h>
+GStepper2< STEPPER2WIRE> stepper(STEPPER_STEPS, STEPPER_STEP, STEPPER_DIR, STEPPER_EN); // объект для работы с шаговым двигателем
+
 Encoder               encoder(ENC_CLK, ENC_DT, ENC_SW, TYPE2); // объект для работы с энкодером
 iarduino_I2C_connect  I2C2;                            // объект I2C2 для работы c библиотекой iarduino_I2C2_connect
 SetupEEPROM           I2CSTPSetup;                     // структура для хранения настроек

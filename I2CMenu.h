@@ -80,6 +80,7 @@ const char str_STP_Start[]  = "STP Start: ";
 const char str_SET_Type[]  = "Type: ";
 const char str_SET_Stp_Ml[]  = "STP/ML: ";
 char* str_STP_Measure = str_STP_Time;
+//const char str_Start_Calibration[]  = "CALIBR Start: ";
 
 LiquidLine back_line(10, 6, str_BACK);
 
@@ -100,6 +101,9 @@ LiquidScreen stp_screen(stp_line_spd, stp_line_dir, stp_line_time, stp_line_star
 LiquidLine setup_line1(0, 0, str_SET_Type, get_stp_type);
 LiquidLine setup_line2(0, 1, str_SET_Stp_Ml, get_stp_ml);
 LiquidScreen setup_screen(setup_line1, setup_line2, back_line);
+
+//LiquidLine calibrate_line1(0, 0, str_Start_Calibration);
+//LiquidScreen calibrate_screen(calibrate_line1, setup_line2, back_line);
 
 LiquidMenu main_menu(lcd);
 
@@ -168,7 +172,11 @@ void blankFunction() {
 void backFunction() {
   //Если выходим из настроек, их нужно сохранить
   if (main_menu.get_currentScreen() == &setup_screen) {
+    lcd.setCursor(0, 0);
+    lcd.print("Reboot!");
     write_config();
+    delay(500);
+    asm volatile("jmp 0x00");
   }
   main_menu.change_screen(&main_screen);
   main_menu.update();

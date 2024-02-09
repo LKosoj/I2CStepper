@@ -10,7 +10,7 @@
 #include <Wire.h>                                     // подключаем библиотеку для работы с шиной I2C
 #include <EEPROM.h>
 #include <iarduino_I2C_connect.h>                     // подключаем библиотеку для соединения arduino по шине I2C
-#include <GyverStepper.h>
+
 #include "PinChangeInterrupt.h"
 #include <GyverEncoder.h>
 #include <TimerOne.h>
@@ -43,7 +43,7 @@ void setup() {
 
   Wire2.begin();                                      // инициируем подключение к шине I2C в качестве мастера
   I2C2.begin(REG_Array);                              // инициируем возможность чтения/записи данных по шине I2C, из/в указываемый массив
-  stepper.setRunMode(FOLLOW_POS);
+//  stepper.setRunMode(FOLLOW_POS);
   REG_Array[8] = 0;
   pinMode(MIXER_PUMP_PIN, OUTPUT);                    // используем ногу для вывода
   pinMode(RELE_PIN2, OUTPUT);                         // используем ногу для вывода
@@ -248,7 +248,7 @@ void start_stepper(bool from_int) {
   Serial.println(F("======================"));
 #endif
 
-  stepper.setRunMode(FOLLOW_POS);
+//  stepper.setRunMode(FOLLOW_POS);
   stepper.setAcceleration(STEPPER_STEPS);
 
   //  stepper.setAcceleration(0);
@@ -258,7 +258,7 @@ void start_stepper(bool from_int) {
   stepper.reverse(dir);
   stepper.setCurrent(0);
   stepper.setMaxSpeed(spd);
-  stepper.setSpeed(spd, true);
+  //stepper.setSpeed(spd, true);
   stepper.setTarget((long)target);
   curr_spd = spd;
 }
@@ -309,7 +309,7 @@ void loop() {
       //шаговик крутится, но текущая скорость отличается от скорости в массиве, установим заданную в массиве
       if (spd != curr_spd) {
         stepper.setMaxSpeed(spd);
-        stepper.setSpeed(spd, true);
+        //stepper.setSpeed(spd, true);
         curr_spd = spd;
         set_spd = get_speed();
 #ifdef __I2CStepper_DEBUG
@@ -328,7 +328,7 @@ void loop() {
       last_dir = dir;
       stepper.enable();
       stepper.setMaxSpeed(spd);
-      stepper.setSpeed(spd, true);
+      //stepper.setSpeed(spd, true);
     }
 
     //если режим - миксер и предыдущее оставшееся время отличается от текущего оставшегося времени больше, чем на 1 секунду в любую сторону,
@@ -344,16 +344,19 @@ void loop() {
       //продолжим первый таймер
       TCCR1B |= savePrescale;
     }
-    if (I2CSTPSetup.Type == I2CPUMP && abs((float)set_time - (float)last_set_time) > 1) {
-      target = (uint32_t)set_time * I2CSTPSetup.StepperStepMl / 100;
-      byte savePrescale;
-      //остановим первый таймер
-      savePrescale = TCCR1B & (0b111 << CS10);
-      TCCR1B &= ~(0b111 << CS10);
-      stepper.setTarget((long)target + stepper.getCurrent());
-      //продолжим первый таймер
-      TCCR1B |= savePrescale;
-    }
+
+    //если режим - насос и предыдущий оставшийся объем отличается от текущего оставшегося больше, чем на количество отобранных миллилитров на этой скорости за секунду,
+    //значит это значение пришло от Самовара и нужно синхронизироваться с ним
+    //    if (I2CSTPSetup.Type == I2CPUMP && abs((float)set_time - (float)last_set_time) > 1) {
+    //      target = (uint32_t)set_time * I2CSTPSetup.StepperStepMl / 100;
+    //      byte savePrescale;
+    //      //остановим первый таймер
+    //      savePrescale = TCCR1B & (0b111 << CS10);
+    //      TCCR1B &= ~(0b111 << CS10);
+    //      stepper.setTarget((long)target + stepper.getCurrent());
+    //      //продолжим первый таймер
+    //      TCCR1B |= savePrescale;
+    //    }
     last_set_time = set_time;
 
     uint32_t crnt_trg = (uint32_t)stepper.getTarget() - (uint32_t)stepper.getCurrent();
@@ -377,11 +380,11 @@ void read_config() {
 
   if (isnan(I2CSTPSetup.Type)) {
     I2CSTPSetup.Type = I2CMIXER;
-    I2CSTPSetup.StepperStepMl = 4500;
     write_config();
   }
-  if (I2CSTPSetup.StepperStepMl < 100) {
-    I2CSTPSetup.StepperStepMl = 100;
+
+  if (I2CSTPSetup.StepperStepMl > 40000 || I2CSTPSetup.StepperStepMl < 100) {
+    I2CSTPSetup.StepperStepMl = 4500;
     write_config();
   }
 
