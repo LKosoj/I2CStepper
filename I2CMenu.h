@@ -287,7 +287,7 @@ void timeDecFunction() {
   uint32_t target;
   if (c < 3) c = 1;
   else c = c / 3;
-  if (set_time <= 1 * multiplier * c) set_time = 0;
+  if (set_time <= 1 * multiplier * c) set_time = 0 - 1;
   else set_time -= 1 * multiplier * c;
   last_set_time = set_time;
 
@@ -476,6 +476,10 @@ void poll_menu(void) {
     Serial.print(get_speed());
     Serial.print(F("; spd = "));
     Serial.print(get_speed_from_array());
+    Serial.print(F("; Stepper spd = "));
+    Serial.print(stepper.getSpeed());
+    Serial.print(F("; Stepper Time = "));
+    Serial.print(stepper.stepTime);
     Serial.print(F("; target = "));
     Serial.println(get_target_from_array());
 #endif

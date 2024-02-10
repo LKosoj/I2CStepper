@@ -27,13 +27,14 @@
 void read_config();
 void write_config();
 
-
-
 void isrENK() {
   encoder.tick();  // отработка в прерывании
 }
 
 void setup() {
+  stepper.brake();                                    // тормозим шаговик
+  stepper.disable();                                  // отключаем шаговик
+
   Serial.begin(115200);
   attachPCINT(digitalPinToPCINT(ENC_CLK), isrENK, CHANGE); //вешаем прерывания для обработки энкодера
   attachPCINT(digitalPinToPCINT(ENC_DT), isrENK, CHANGE);  //вешаем прерывания для обработки энкодера
@@ -43,7 +44,7 @@ void setup() {
 
   Wire2.begin();                                      // инициируем подключение к шине I2C в качестве мастера
   I2C2.begin(REG_Array);                              // инициируем возможность чтения/записи данных по шине I2C, из/в указываемый массив
-//  stepper.setRunMode(FOLLOW_POS);
+  //  stepper.setRunMode(FOLLOW_POS);
   REG_Array[8] = 0;
   pinMode(MIXER_PUMP_PIN, OUTPUT);                    // используем ногу для вывода
   pinMode(RELE_PIN2, OUTPUT);                         // используем ногу для вывода
@@ -51,9 +52,6 @@ void setup() {
   pinMode(RELE_PIN4, OUTPUT);                         // используем ногу для вывода
 
   menu_init();                                        // инициализуерм меню экрана
-
-  stepper.brake();                                    // тормозим шаговик
-  stepper.disable();                                  // отключаем шаговик
 
   Timer1.initialize(40);                              // инициализируем таймер для упарвления шаговиком
   Timer1.attachInterrupt(stp_tick);
@@ -135,7 +133,7 @@ uint32_t get_speed(void) {
     if (set_spd == 0 || stepper_state) set_spd = ((float)get_speed_from_array() / STEPPER_STEPS * 60 + 0.4);
   } else if (I2CSTPSetup.Type == I2CPUMP) {
     //в миллилитрах в час
-    if (set_spd == 0 || stepper_state) set_spd = (float)get_speed_from_array() * 3600 / I2CSTPSetup.StepperStepMl;
+    if (set_spd == 0 || stepper_state) set_spd = ((float)get_speed_from_array() + 0.8) * 3600 / I2CSTPSetup.StepperStepMl;
   }
   return set_spd;
 }
@@ -248,8 +246,8 @@ void start_stepper(bool from_int) {
   Serial.println(F("======================"));
 #endif
 
-//  stepper.setRunMode(FOLLOW_POS);
-  stepper.setAcceleration(STEPPER_STEPS);
+  //  stepper.setRunMode(FOLLOW_POS);
+  stepper.setAcceleration(spd / 10);
 
   //  stepper.setAcceleration(0);
   //  Serial.println("===No Acceleration====");
@@ -258,7 +256,7 @@ void start_stepper(bool from_int) {
   stepper.reverse(dir);
   stepper.setCurrent(0);
   stepper.setMaxSpeed(spd);
-  //stepper.setSpeed(spd, true);
+  stepper.setSpeed(spd, true);
   stepper.setTarget((long)target);
   curr_spd = spd;
 }
@@ -282,6 +280,7 @@ void stop_stepper() {
 void loop() {
   //TRACE();
   uint32_t target;
+  uint32_t t;
   uint16_t spd;
 
   //опрашиваем состояние энкодера и работаем с меню
@@ -300,6 +299,7 @@ void loop() {
   byte dir = get_direction_from_array();
   stepper_state = stepper.getState();
 
+  t = 0;
   //шаговик крутит
   if (target > 0 && spd > 0) {
     if (!stepper_state) {
@@ -309,7 +309,8 @@ void loop() {
       //шаговик крутится, но текущая скорость отличается от скорости в массиве, установим заданную в массиве
       if (spd != curr_spd) {
         stepper.setMaxSpeed(spd);
-        //stepper.setSpeed(spd, true);
+        t = stepper.getTarget();
+        stepper.setSpeed(spd, true);
         curr_spd = spd;
         set_spd = get_speed();
 #ifdef __I2CStepper_DEBUG
@@ -328,7 +329,7 @@ void loop() {
       last_dir = dir;
       stepper.enable();
       stepper.setMaxSpeed(spd);
-      //stepper.setSpeed(spd, true);
+      stepper.setSpeed(spd, true);
     }
 
     //если режим - миксер и предыдущее оставшееся время отличается от текущего оставшегося времени больше, чем на 1 секунду в любую сторону,
@@ -336,13 +337,7 @@ void loop() {
     uint16_t set_time = get_stepper_time();
     if (I2CSTPSetup.Type == I2CMIXER && abs((float)set_time - (float)last_set_time) > 1) {
       target = (uint32_t)set_time * spd;
-      byte savePrescale;
-      //остановим первый таймер
-      savePrescale = TCCR1B & (0b111 << CS10);
-      TCCR1B &= ~(0b111 << CS10);
-      stepper.setTarget((long)target + stepper.getCurrent());
-      //продолжим первый таймер
-      TCCR1B |= savePrescale;
+      t = (long)target + stepper.getCurrent();
     }
 
     //если режим - насос и предыдущий оставшийся объем отличается от текущего оставшегося больше, чем на количество отобранных миллилитров на этой скорости за секунду,
@@ -357,6 +352,18 @@ void loop() {
     //      //продолжим первый таймер
     //      TCCR1B |= savePrescale;
     //    }
+
+    if (t != 0) {
+      byte savePrescale;
+      //остановим первый таймер
+      savePrescale = TCCR1B & (0b111 << CS10);
+      TCCR1B &= ~(0b111 << CS10);
+      stepper.setAcceleration(get_speed_from_array() / 10);
+      stepper.setTarget(t);
+      //продолжим первый таймер
+      TCCR1B |= savePrescale;
+    }
+
     last_set_time = set_time;
 
     uint32_t crnt_trg = (uint32_t)stepper.getTarget() - (uint32_t)stepper.getCurrent();
