@@ -1,7 +1,7 @@
 #ifndef __I2CSTEPPER_H
 #define __I2CSTEPPER_H
 
-#define I2CSTEPPER_VERSION 0.3
+#define I2CSTEPPER_VERSION 0.4
 
 //#define __I2CStepper_DEBUG
 
