@@ -10,6 +10,8 @@
 #define SDA_PORT PORTC
 #endif
 
+//#define LIQUIDMENU_DEBUG true
+
 #include <LiquidCrystal_I2C2.h>
 #include <LiquidMenu.h>
 #include <ArduinoTrace.h>
@@ -52,6 +54,7 @@ const char* get_rele_state2();
 const char* get_rele_state3();
 const char* get_rele_state4();
 const char* get_stp_type();
+const char* get_measure();
 uint32_t get_stp_ml();
 bool set_rele_state_to_array(byte r, bool s);
 void write_config();
@@ -65,22 +68,21 @@ const char c_Mixer[] PROGMEM = "Mixer";
 const char c_Pump[] PROGMEM =  "Pump ";
 const char c_None[] PROGMEM =  "None ";
 
-const char str_BACK[] = "<BACK";
-const char str_STP[]  = "STP> ";
-const char str_Pmp[]  = ">Pump: ";
-const char str_R2[]  = ">Rele2: ";
-const char str_R3[]  = ">Rele3: ";
-const char str_R4[]  = ">Rele4: ";
-const char str_SET[]  = "SETUP>";
-const char str_STP_Spd[]  = "STP Spd: ";
-const char str_STP_Dir[]  = "STP Dir: ";
-const char str_STP_Time[]  = "STP Time: ";
-const char str_STP_Ml[]  = "STP ML: ";
-const char str_STP_Start[]  = "STP Start: ";
-const char str_SET_Type[]  = "Type: ";
-const char str_SET_Stp_Ml[]  = "STP/ML: ";
-char* str_STP_Measure = str_STP_Time;
-//const char str_Start_Calibration[]  = "CALIBR Start: ";
+const char str_BACK[] PROGMEM = "<BACK";
+const char str_STP[]  PROGMEM = "STP>";
+const char str_Pmp[]  PROGMEM = ">Pump:";
+const char str_R2[]  PROGMEM = ">Rele2:";
+const char str_R3[]  PROGMEM = ">Rele3:";
+const char str_R4[]  PROGMEM = ">Rele4:";
+const char str_SET[]  PROGMEM = "SETUP>";
+const char str_STP_Spd[]  PROGMEM = "STP Spd:";
+const char str_STP_Dir[]  PROGMEM = "STP Dir:";
+const char str_STP_Time[] PROGMEM = "STP Time:";
+const char str_STP_Ml[] PROGMEM = "STP ML:";
+const char str_STP_Start[] PROGMEM = "STP Start:";
+const char str_SET_Type[] PROGMEM = "Type:";
+const char str_SET_Stp_Ml[] PROGMEM = "STP/ML:";
+const char str_Start_Calibration[] PROGMEM = "CALIBR Start:";
 
 LiquidLine back_line(10, 6, str_BACK);
 
@@ -94,7 +96,7 @@ LiquidScreen main_screen(main_line1, main_line2);
 
 LiquidLine stp_line_spd(0, 0, str_STP_Spd, get_speed);
 LiquidLine stp_line_dir(0, 1, str_STP_Dir, get_direction);
-LiquidLine stp_line_time(0, 2, str_STP_Measure, get_stepper_time);
+LiquidLine stp_line_time(0, 2, get_measure, get_stepper_time);
 LiquidLine stp_line_start(0, 3, str_STP_Start, get_stepper_state_c);
 LiquidScreen stp_screen(stp_line_spd, stp_line_dir, stp_line_time, stp_line_start);
 
@@ -102,8 +104,8 @@ LiquidLine setup_line1(0, 0, str_SET_Type, get_stp_type);
 LiquidLine setup_line2(0, 1, str_SET_Stp_Ml, get_stp_ml);
 LiquidScreen setup_screen(setup_line1, setup_line2, back_line);
 
-//LiquidLine calibrate_line1(0, 0, str_Start_Calibration);
-//LiquidScreen calibrate_screen(calibrate_line1, setup_line2, back_line);
+LiquidLine calibrate_line1(0, 0, str_Start_Calibration);
+LiquidScreen calibrate_screen(calibrate_line1, setup_line2, back_line);
 
 LiquidMenu main_menu(lcd);
 
@@ -112,9 +114,18 @@ uint32_t get_stp_ml() {
 }
 
 const char* get_c_ptr(const char* p_str) {
-  static char buf_g[6];
+  static char buf_g[10];
   strcpy_P(buf_g, p_str);
   return  buf_g;
+}
+
+const char* get_measure(){
+  //устанавливаем в меню нужный тип изменерения
+  if (I2CSTPSetup.Type == I2CMIXER) {
+    return get_c_ptr(str_STP_Time);
+  } else if (I2CSTPSetup.Type == I2CPUMP) {
+    return get_c_ptr(str_STP_Ml);
+  }
 }
 
 const char* get_stp_type() {
@@ -368,7 +379,23 @@ void menu_init(void) {
   main_screen.set_displayLineCount(2);
   stp_screen.set_displayLineCount(2);
   setup_screen.set_displayLineCount(2);
+  calibrate_screen.set_displayLineCount(2);
 
+  back_line.set_asProgmem(1);
+  main_line1.set_asProgmem(1);
+  main_line2.set_asProgmem(1);
+  main_line3.set_asProgmem(1);
+  main_line4.set_asProgmem(1);
+  main_line5.set_asProgmem(1);
+  main_line6.set_asProgmem(1);
+  stp_line_spd.set_asProgmem(1);
+  stp_line_dir.set_asProgmem(1);
+  stp_line_start.set_asProgmem(1);
+  setup_line1.set_asProgmem(1);
+  setup_line2.set_asProgmem(1);
+  calibrate_line1.set_asProgmem(1);
+
+  
   main_menu.add_screen(main_screen);
   main_menu.add_screen(stp_screen);
   main_menu.add_screen(setup_screen);
