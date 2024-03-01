@@ -396,12 +396,6 @@ void read_config() {
   }
 
   Wire.begin(I2CSTPSetup.Type);                       // инициируем подключение к шине I2C в качестве ведомого (slave) устройства, с указанием своего адреса на шине.
-  //устанавливаем в меню нужный тип изменерения
-  if (I2CSTPSetup.Type == I2CMIXER) {
-    str_STP_Measure = str_STP_Time;
-  } else if (I2CSTPSetup.Type == I2CPUMP) {
-    str_STP_Measure = str_STP_Ml;
-  }
   main_menu.update();
 }
 
