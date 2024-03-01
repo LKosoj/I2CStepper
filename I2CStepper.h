@@ -21,7 +21,7 @@
 // Настройки для шагового двигателя
 #define STEPPER_MS 2
 #define STEPPER_STEPS (200 * STEPPER_MS) //количество шагов, 200 x MS
-#define STEPPER_MAX_SPEED 6000
+#define STEPPER_MAX_SPEED 80000
 
 
 //Пины для реле
