@@ -390,7 +390,7 @@ void read_config() {
     write_config();
   }
 
-  if (I2CSTPSetup.StepperStepMl > 40000 || I2CSTPSetup.StepperStepMl < 100) {
+  if (I2CSTPSetup.StepperStepMl > 80000 || I2CSTPSetup.StepperStepMl < 100) {
     I2CSTPSetup.StepperStepMl = 4500;
     write_config();
   }
