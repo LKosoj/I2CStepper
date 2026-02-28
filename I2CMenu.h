@@ -14,7 +14,7 @@
 
 #include <LiquidCrystal_I2C2.h>
 #include <LiquidMenu.h>
-#include <ArduinoTrace.h>
+#include <avr/wdt.h>
 
 #define LCD_ADDRESS 0x27
 #define LCD_COLUMNS 16
@@ -27,12 +27,10 @@ enum FunctionTypes {
 
 LiquidCrystal_I2C2 lcd(LCD_ADDRESS, LCD_COLUMNS, LCD_ROWS);
 
-LiquidMenu menu(lcd);
-
 byte multiplier;
 byte m_cnt;
 bool navigate;
-byte oldS;
+uint32_t oldS;
 
 
 void set_direction_to_array(byte dir);
@@ -46,10 +44,11 @@ uint32_t get_stepper_time(void);
 void start_stepper(bool from_int);
 void stop_stepper();
 uint32_t get_target_from_array(void);
-uint16_t get_spd_stp(uint16_t spd);
+uint16_t get_spd_stp(uint32_t spd);
 void set_speed_to_array(uint16_t spd);
 uint16_t get_speed_from_array(void);
 void set_target_to_array(uint32_t target);
+uint32_t calc_target_from_time(uint32_t time_value, uint16_t spd);
 const char* get_rele_state2();
 const char* get_rele_state3();
 const char* get_rele_state4();
@@ -57,9 +56,10 @@ const char* get_stp_type();
 const char* get_measure();
 uint32_t get_stp_ml();
 bool set_rele_state_to_array(byte r, bool s);
+uint32_t get_max_user_speed(void);
 void write_config();
-
-void(* resetFunc) (void) = 0;
+bool is_comm_failsafe_latched(void);
+bool try_clear_comm_failsafe_latch(void);
 
 //строки для меню
 const char c_On[] PROGMEM =  "On ";
@@ -82,7 +82,6 @@ const char str_STP_Ml[] PROGMEM = "STP ML:";
 const char str_STP_Start[] PROGMEM = "STP Start:";
 const char str_SET_Type[] PROGMEM = "Type:";
 const char str_SET_Stp_Ml[] PROGMEM = "STP/ML:";
-const char str_Start_Calibration[] PROGMEM = "CALIBR Start:";
 
 LiquidLine back_line(10, 6, str_BACK);
 
@@ -104,9 +103,6 @@ LiquidLine setup_line1(0, 0, str_SET_Type, get_stp_type);
 LiquidLine setup_line2(0, 1, str_SET_Stp_Ml, get_stp_ml);
 LiquidScreen setup_screen(setup_line1, setup_line2, back_line);
 
-LiquidLine calibrate_line1(0, 0, str_Start_Calibration);
-LiquidScreen calibrate_screen(calibrate_line1, setup_line2, back_line);
-
 LiquidMenu main_menu(lcd);
 
 uint32_t get_stp_ml() {
@@ -126,6 +122,7 @@ const char* get_measure(){
   } else if (I2CSTPSetup.Type == I2CPUMP) {
     return get_c_ptr(str_STP_Ml);
   }
+  return get_c_ptr(str_STP_Time);
 }
 
 const char* get_stp_type() {
@@ -187,7 +184,9 @@ void backFunction() {
     lcd.print("Reboot!");
     write_config();
     delay(500);
-    asm volatile("jmp 0x00");
+    wdt_enable(WDTO_15MS);
+    while (true) {
+    }
   }
   main_menu.change_screen(&main_screen);
   main_menu.update();
@@ -214,20 +213,21 @@ void spd_ml_DecFunction() {
 //инкремент скорости шаговика
 void spdIncFunction() {
   byte c = m_cnt;
-  uint32_t s;
+  uint32_t max_spd = get_max_user_speed();
   if (c < 3) c = 1;
   else c = c / 3;
   set_spd += 1 * multiplier * c;
-  if (set_spd > STEPPER_MAX_SPEED) set_spd = STEPPER_MAX_SPEED;
+  if (set_spd > max_spd) set_spd = max_spd;
   if (stepper_state) {
-    s = get_spd_stp(set_spd);
+    uint16_t s = get_spd_stp(set_spd);
     set_speed_to_array(s);
   }
 #ifdef __I2CStepper_DEBUG
   Serial.print(F("SSSSSetSpd = "));
   Serial.println(set_spd);
   Serial.print(F("Set spd = "));
-  Serial.println(s);
+  if (stepper_state) Serial.println(get_spd_stp(set_spd));
+  else Serial.println(F("n/a"));
   Serial.print(F("Get spd from array = "));
   Serial.println(get_speed_from_array());
 #endif
@@ -236,20 +236,20 @@ void spdIncFunction() {
 //декремент скорости шаговика
 void spdDecFunction() {
   byte c = m_cnt;
-  uint32_t s;
   if (c < 3) c = 1;
   else c = c / 3;
   if (set_spd <= 1 * multiplier * c) set_spd = 1;
   else set_spd -= 1 * multiplier * c;
   if (stepper_state) {
-    s = get_spd_stp(set_spd);
+    uint16_t s = get_spd_stp(set_spd);
     set_speed_to_array(s);
   }
 #ifdef __I2CStepper_DEBUG
   Serial.print(F("SSSSSetSpd = "));
   Serial.println(set_spd);
   Serial.print(F("Set spd = "));
-  Serial.println(s);
+  if (stepper_state) Serial.println(get_spd_stp(set_spd));
+  else Serial.println(F("n/a"));
   Serial.print(F("Get spd from array = "));
   Serial.println(get_speed_from_array());
 #endif
@@ -258,27 +258,28 @@ void spdDecFunction() {
 //инкремент времени работы шаговика
 void timeIncFunction() {
   byte c = m_cnt;
-  uint32_t target;
   if (c < 3) c = 1;
   else c = c / 3;
   set_time += 1 * multiplier * c;
   if (set_time > 100000) set_time = 100000;
+  set_time_initialized = true;
   last_set_time = set_time;
 
   if (stepper_state) {
     uint16_t spd = get_speed_from_array();
-    if (I2CSTPSetup.Type == I2CMIXER) {
-      target = (uint32_t)set_time * spd;
-    }
-    if (I2CSTPSetup.Type == I2CPUMP) {
-      target = (uint32_t)set_time * I2CSTPSetup.StepperStepMl / 100;
-    }
+    uint32_t target = calc_target_from_time(set_time, spd);
     set_target_to_array(target);
     byte savePrescale;
     //остановим первый таймер
     savePrescale = TCCR1B & (0b111 << CS10);
     TCCR1B &= ~(0b111 << CS10);
-    stepper.setTarget((long)target + stepper.getCurrent());
+    int64_t absolute_target = (int64_t)target + (int64_t)stepper.getCurrent();
+    if (absolute_target < 0) {
+      absolute_target = 0;
+    } else if ((uint64_t)absolute_target > STEPPER_TARGET_LIMIT) {
+      absolute_target = STEPPER_TARGET_LIMIT;
+    }
+    stepper.setTarget((long)absolute_target);
     //продолжим первый таймер
     TCCR1B |= savePrescale;
   }
@@ -286,7 +287,8 @@ void timeIncFunction() {
   Serial.print(F("Set time = "));
   Serial.println(set_time);
   Serial.print(F("Set target = "));
-  Serial.println(target);
+  if (stepper_state) Serial.println(calc_target_from_time(set_time, get_speed_from_array()));
+  else Serial.println(F("n/a"));
   Serial.print(F("Get target from array = "));
   Serial.println(get_target_from_array());
 #endif
@@ -295,27 +297,28 @@ void timeIncFunction() {
 //декремент времени работы шаговика
 void timeDecFunction() {
   byte c = m_cnt;
-  uint32_t target;
   if (c < 3) c = 1;
   else c = c / 3;
-  if (set_time <= 1 * multiplier * c) set_time = 0 - 1;
+  if (set_time <= 1 * multiplier * c) set_time = 0;
   else set_time -= 1 * multiplier * c;
+  set_time_initialized = true;
   last_set_time = set_time;
 
   if (stepper_state) {
     uint16_t spd = get_speed_from_array();
-    if (I2CSTPSetup.Type == I2CMIXER) {
-      target = (uint32_t)set_time * spd;
-    }
-    if (I2CSTPSetup.Type == I2CPUMP) {
-      target = (uint32_t)set_time * I2CSTPSetup.StepperStepMl;
-    }
+    uint32_t target = calc_target_from_time(set_time, spd);
     set_target_to_array(target);
     byte savePrescale;
     //остановим первый таймер
     savePrescale = TCCR1B & (0b111 << CS10);
     TCCR1B &= ~(0b111 << CS10);
-    stepper.setTarget((long)target + stepper.getCurrent());
+    int64_t absolute_target = (int64_t)target + (int64_t)stepper.getCurrent();
+    if (absolute_target < 0) {
+      absolute_target = 0;
+    } else if ((uint64_t)absolute_target > STEPPER_TARGET_LIMIT) {
+      absolute_target = STEPPER_TARGET_LIMIT;
+    }
+    stepper.setTarget((long)absolute_target);
     //продолжим первый таймер
     TCCR1B |= savePrescale;
   }
@@ -323,7 +326,8 @@ void timeDecFunction() {
   Serial.print(F("Set time = "));
   Serial.println(set_time);
   Serial.print(F("Set target = "));
-  Serial.println(target);
+  if (stepper_state) Serial.println(calc_target_from_time(set_time, get_speed_from_array()));
+  else Serial.println(F("n/a"));
   Serial.print(F("Get target from array = "));
   Serial.println(get_target_from_array());
 #endif
@@ -332,6 +336,7 @@ void timeDecFunction() {
 //изменение направления вращения шаговика
 void dirFunction() {
   set_dir = !set_dir;
+  set_dir_initialized = true;
   set_direction_to_array(set_dir);
 }
 
@@ -379,7 +384,6 @@ void menu_init(void) {
   main_screen.set_displayLineCount(2);
   stp_screen.set_displayLineCount(2);
   setup_screen.set_displayLineCount(2);
-  calibrate_screen.set_displayLineCount(2);
 
   back_line.set_asProgmem(1);
   main_line1.set_asProgmem(1);
@@ -393,7 +397,6 @@ void menu_init(void) {
   stp_line_start.set_asProgmem(1);
   setup_line1.set_asProgmem(1);
   setup_line2.set_asProgmem(1);
-  calibrate_line1.set_asProgmem(1);
 
   
   main_menu.add_screen(main_screen);
@@ -409,7 +412,18 @@ void menu_init(void) {
 void poll_menu(void) {
   bool updscreen = true;
 
-  encoder.tick();
+  if (is_comm_failsafe_latched()) {
+    if (encoder.isClick() && try_clear_comm_failsafe_latch()) {
+      lcd.clear();
+      main_menu.update();
+    } else {
+      lcd.setCursor(0, 0);
+      lcd.print(F("I2C FAILSAFE   "));
+      lcd.setCursor(0, 1);
+      lcd.print(F("Click to reset "));
+    }
+    return;
+  }
 
   if (encoder.isRight()) {
     multiplier = 1;
@@ -488,7 +502,7 @@ void poll_menu(void) {
     }
     else navigate = !navigate;
   }
-  byte currS = millis() / 1000;
+  uint32_t currS = millis() / 1000;
   if (currS != oldS) {
     if (((currS / 10) * 10) == currS) {
       main_menu.update();

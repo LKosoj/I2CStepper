@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  build-and-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout I2CStepper
+        uses: actions/checkout@v4
+
+      - name: Checkout Samovar Libraries
+        uses: actions/checkout@v4
+        with:
+          repository: LKosoj/Samovar
+          path: Samovar
+
+      - name: Provide ../Samovar Path For platformio.ini
+        run: ln -s "$GITHUB_WORKSPACE/Samovar" "$GITHUB_WORKSPACE/../Samovar"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install platformio
+          sudo apt-get update
+          sudo apt-get install -y cppcheck
+
+      - name: Static Analysis
+        run: |
+          cppcheck --enable=warning,style,performance,portability \
+            --std=c++11 \
+            --suppress=missingIncludeSystem \
+            --error-exitcode=1 \
+            I2CStepper.ino I2CMenu.h I2CStepper.h
+
+      - name: Host Math Tests
+        run: |
+          g++ -std=c++11 -Wall -Wextra -pedantic -I. tests/stepper_math_test.cpp -o /tmp/stepper_math_test
+          /tmp/stepper_math_test
+
+      - name: PlatformIO Build
+        run: pio run

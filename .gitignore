@@ -1,2 +1,6 @@
 
 /.vscode
+/.cli-proxy
+/.venv
+/.venv-pio
+/.pio
