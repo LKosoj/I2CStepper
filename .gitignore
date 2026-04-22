@@ -4,3 +4,7 @@
 /.venv
 /.venv-pio
 /.pio
+AGENTS.md
+GEMINI.md
+CLAUDE.md
+QWEN.md

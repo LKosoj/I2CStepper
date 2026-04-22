@@ -57,9 +57,14 @@ const char* get_measure();
 uint32_t get_stp_ml();
 bool set_rele_state_to_array(byte r, bool s);
 uint32_t get_max_user_speed(void);
+uint32_t get_min_user_speed(void);
 void write_config();
 bool is_comm_failsafe_latched(void);
 bool try_clear_comm_failsafe_latch(void);
+uint8_t pause_stepper_timer(void);
+void resume_stepper_timer(uint8_t prescale);
+
+#define STEPPER_STEP_ML_MIN 100UL
 
 //строки для меню
 const char c_On[] PROGMEM =  "On ";
@@ -83,9 +88,10 @@ const char str_STP_Start[] PROGMEM = "STP Start:";
 const char str_SET_Type[] PROGMEM = "Type:";
 const char str_SET_Stp_Ml[] PROGMEM = "STP/ML:";
 
-LiquidLine back_line(10, 6, str_BACK);
+LiquidLine back_line_stp(10, 6, str_BACK);
+LiquidLine back_line_setup(10, 6, str_BACK);
 
-LiquidLine main_line1(0, 0, str_STP, get_stepper_time);
+LiquidLine main_line1(0, 0, get_measure, get_stepper_time);
 LiquidLine main_line2(0, 1, str_Pmp, get_mixer_pump_state);
 LiquidLine main_line3(0, 2, str_R2, get_rele_state2);
 LiquidLine main_line4(0, 3, str_R3, get_rele_state3);
@@ -101,7 +107,11 @@ LiquidScreen stp_screen(stp_line_spd, stp_line_dir, stp_line_time, stp_line_star
 
 LiquidLine setup_line1(0, 0, str_SET_Type, get_stp_type);
 LiquidLine setup_line2(0, 1, str_SET_Stp_Ml, get_stp_ml);
-LiquidScreen setup_screen(setup_line1, setup_line2, back_line);
+LiquidScreen setup_screen(setup_line1, setup_line2, back_line_setup);
+
+//«грязный» флаг — пишем конфиг и перезагружаемся только если в setup что-то реально поменялось
+bool setup_dirty = false;
+SetupEEPROM setup_snapshot;
 
 LiquidMenu main_menu(lcd);
 
@@ -169,6 +179,7 @@ int get_stepper_state() {
 void change_type() {
   I2CSTPSetup.Type++;
   if (I2CSTPSetup.Type > I2CPUMP ) I2CSTPSetup.Type = I2CMIXER;
+  setup_dirty = true;
 }
 
 // Used for attaching something to the lines, to make them focusable.
@@ -176,48 +187,63 @@ void blankFunction() {
   return;
 }
 
+static bool setup_changed(void) {
+  return I2CSTPSetup.Type != setup_snapshot.Type ||
+         I2CSTPSetup.StepperStepMl != setup_snapshot.StepperStepMl;
+}
+
 //функция для возврата в основное меню
 void backFunction() {
-  //Если выходим из настроек, их нужно сохранить
+  //Если выходим из настроек и там реально что-то поменялось — сохранить и перезагрузиться (меняется I2C-адрес)
   if (main_menu.get_currentScreen() == &setup_screen) {
-    lcd.setCursor(0, 0);
-    lcd.print("Reboot!");
-    write_config();
-    delay(500);
-    wdt_enable(WDTO_15MS);
-    while (true) {
+    if (setup_dirty || setup_changed()) {
+      lcd.setCursor(0, 0);
+      lcd.print("Reboot!");
+      write_config();
+      delay(500);
+      wdt_enable(WDTO_15MS);
+      while (true) {
+      }
     }
   }
+  navigate = true;
   main_menu.change_screen(&main_screen);
   main_menu.update();
 }
 
-//инкремент шагов на мл
+//инкремент шагов на 100 мл
 void spd_ml_IncFunction() {
   byte c = m_cnt;
   if (c < 3) c = 1;
   else c = c / 3;
-  I2CSTPSetup.StepperStepMl += 1 * multiplier * c;
+  I2CSTPSetup.StepperStepMl += 1UL * multiplier * c;
+  setup_dirty = true;
 }
 
-//декремент шагов на мл
+//декремент шагов на 100 мл
 void spd_ml_DecFunction() {
   byte c = m_cnt;
   if (c < 3) c = 1;
   else c = c / 3;
-  if (I2CSTPSetup.StepperStepMl <= 1 * multiplier * c) {
-    I2CSTPSetup.StepperStepMl = 1;
-  } else I2CSTPSetup.StepperStepMl -= 1 * multiplier * c;
+  uint32_t delta = 1UL * multiplier * c;
+  if (I2CSTPSetup.StepperStepMl <= STEPPER_STEP_ML_MIN + delta) {
+    I2CSTPSetup.StepperStepMl = STEPPER_STEP_ML_MIN;
+  } else {
+    I2CSTPSetup.StepperStepMl -= delta;
+  }
+  setup_dirty = true;
 }
 
 //инкремент скорости шаговика
 void spdIncFunction() {
   byte c = m_cnt;
   uint32_t max_spd = get_max_user_speed();
+  uint32_t min_spd = get_min_user_speed();
   if (c < 3) c = 1;
   else c = c / 3;
-  set_spd += 1 * multiplier * c;
+  set_spd += 1UL * multiplier * c;
   if (set_spd > max_spd) set_spd = max_spd;
+  if (set_spd < min_spd) set_spd = min_spd;
   if (stepper_state) {
     uint16_t s = get_spd_stp(set_spd);
     set_speed_to_array(s);
@@ -236,10 +262,12 @@ void spdIncFunction() {
 //декремент скорости шаговика
 void spdDecFunction() {
   byte c = m_cnt;
+  uint32_t min_spd = get_min_user_speed();
   if (c < 3) c = 1;
   else c = c / 3;
-  if (set_spd <= 1 * multiplier * c) set_spd = 1;
-  else set_spd -= 1 * multiplier * c;
+  uint32_t delta = 1UL * multiplier * c;
+  if (set_spd <= min_spd + delta) set_spd = min_spd;
+  else set_spd -= delta;
   if (stepper_state) {
     uint16_t s = get_spd_stp(set_spd);
     set_speed_to_array(s);
@@ -269,10 +297,7 @@ void timeIncFunction() {
     uint16_t spd = get_speed_from_array();
     uint32_t target = calc_target_from_time(set_time, spd);
     set_target_to_array(target);
-    byte savePrescale;
-    //остановим первый таймер
-    savePrescale = TCCR1B & (0b111 << CS10);
-    TCCR1B &= ~(0b111 << CS10);
+    uint8_t saved_prescale = pause_stepper_timer();
     int64_t absolute_target = (int64_t)target + (int64_t)stepper.getCurrent();
     if (absolute_target < 0) {
       absolute_target = 0;
@@ -280,8 +305,7 @@ void timeIncFunction() {
       absolute_target = STEPPER_TARGET_LIMIT;
     }
     stepper.setTarget((long)absolute_target);
-    //продолжим первый таймер
-    TCCR1B |= savePrescale;
+    resume_stepper_timer(saved_prescale);
   }
 #ifdef __I2CStepper_DEBUG
   Serial.print(F("Set time = "));
@@ -308,10 +332,7 @@ void timeDecFunction() {
     uint16_t spd = get_speed_from_array();
     uint32_t target = calc_target_from_time(set_time, spd);
     set_target_to_array(target);
-    byte savePrescale;
-    //остановим первый таймер
-    savePrescale = TCCR1B & (0b111 << CS10);
-    TCCR1B &= ~(0b111 << CS10);
+    uint8_t saved_prescale = pause_stepper_timer();
     int64_t absolute_target = (int64_t)target + (int64_t)stepper.getCurrent();
     if (absolute_target < 0) {
       absolute_target = 0;
@@ -319,8 +340,7 @@ void timeDecFunction() {
       absolute_target = STEPPER_TARGET_LIMIT;
     }
     stepper.setTarget((long)absolute_target);
-    //продолжим первый таймер
-    TCCR1B |= savePrescale;
+    resume_stepper_timer(saved_prescale);
   }
 #ifdef __I2CStepper_DEBUG
   Serial.print(F("Set time = "));
@@ -348,7 +368,8 @@ void menu_init(void) {
   lcd.clear();
   navigate = true;
 
-  back_line.attach_function(1, backFunction);
+  back_line_stp.attach_function(1, backFunction);
+  back_line_setup.attach_function(1, backFunction);
 
   main_line1.attach_function(1, blankFunction);
   main_line2.attach_function(1, blankFunction);
@@ -362,13 +383,13 @@ void menu_init(void) {
   main_line5.attach_function(1, blankFunction);
   main_line6.attach_function(1, blankFunction);
 
-  stp_screen.add_line(back_line);
+  stp_screen.add_line(back_line_stp);
 
   stp_line_spd.attach_function(increase, spdIncFunction);
   stp_line_spd.attach_function(decrease, spdDecFunction);
 
-  stp_line_dir.attach_function(increase, backFunction);
-  stp_line_dir.attach_function(decrease, backFunction);
+  stp_line_dir.attach_function(increase, blankFunction);
+  stp_line_dir.attach_function(decrease, blankFunction);
 
   stp_line_time.attach_function(increase, timeIncFunction);
   stp_line_time.attach_function(decrease, timeDecFunction);
@@ -385,8 +406,8 @@ void menu_init(void) {
   stp_screen.set_displayLineCount(2);
   setup_screen.set_displayLineCount(2);
 
-  back_line.set_asProgmem(1);
-  main_line1.set_asProgmem(1);
+  back_line_stp.set_asProgmem(1);
+  back_line_setup.set_asProgmem(1);
   main_line2.set_asProgmem(1);
   main_line3.set_asProgmem(1);
   main_line4.set_asProgmem(1);
@@ -406,6 +427,8 @@ void menu_init(void) {
   main_menu.change_screen(&main_screen);
   main_menu.update();
   main_menu.set_focusedLine(0);
+  setup_snapshot = I2CSTPSetup;
+  setup_dirty = false;
 }
 
 //функция для опроса состояния энкодера и обработки меню
@@ -468,6 +491,7 @@ void poll_menu(void) {
     if (main_menu.get_currentScreen() == &main_screen) {
       if (main_menu.get_focusedLine() == 0) {
         updscreen = false;
+        navigate = true;
         main_menu.change_screen(&stp_screen);
         main_menu.set_focusedLine(0);
         main_menu.update();
@@ -478,6 +502,9 @@ void poll_menu(void) {
         main_menu.update();
       } else if (main_menu.get_focusedLine() == 5) {
         updscreen = false;
+        navigate = true;
+        setup_dirty = false;
+        setup_snapshot = I2CSTPSetup;
         main_menu.change_screen(&setup_screen);
         main_menu.set_focusedLine(0);
         main_menu.update();
