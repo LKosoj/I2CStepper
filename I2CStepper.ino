@@ -30,35 +30,33 @@ byte get_direction_from_array(void);
 byte get_rele_mask_from_array(void);
 void read_motion_from_array(uint32_t* target, uint16_t* speed, byte* dir);
 uint32_t calc_target_from_time(uint32_t time_value, uint16_t spd);
+void publish_config_to_registers();
+void load_session_from_registers();
+bool mode_supported(byte mode);
+void publish_status();
+void handle_command();
+void start_current_mode();
+void start_calibration();
+void finish_calibration();
+bool external_sensor_active();
+void update_runtime_state();
 
-static const uint16_t REG_READY_TIMEOUT_MS = 25;
+static const uint16_t REG_LOCK_TIMEOUT_MS = 25;
 static bool comm_timeout_error = false;
 static bool comm_failsafe_latched = false;
-
-enum RegisterIndex : uint8_t {
-  REG_SPEED_MSB = 0,
-  REG_SPEED_LSB = 1,
-  REG_DIR = 2,
-  REG_TARGET_3 = 3,
-  REG_TARGET_2 = 4,
-  REG_TARGET_1 = 5,
-  REG_TARGET_0 = 6,
-  REG_RELAY_MASK = 7,
-  REG_READY = 8,
-};
 
 static volatile byte* reg_view() {
   return (volatile byte*)REG_Array;
 }
 
-//REG_READY выступает семафором: 1 — кто-то из участников (мастер или слейв) пишет в регистры.
+//REG_LOCK выступает семафором: 1 — кто-то из участников (мастер или слейв) пишет в регистры.
 //acquire_register_lock гарантирует, что слейв получает эксклюзивное владение без TOCTOU между проверкой
 //и cli(): второй шаг проверяет ещё раз под cli(), и только тогда выставляет READY=1.
 static bool acquire_register_lock() {
   const volatile byte* regs = reg_view();
   uint32_t start = millis();
-  while (regs[REG_READY] == 1) {
-    if ((uint32_t)(millis() - start) >= REG_READY_TIMEOUT_MS) {
+  while (regs[REG_LOCK] == 1) {
+    if ((uint32_t)(millis() - start) >= REG_LOCK_TIMEOUT_MS) {
       comm_timeout_error = true;
       return false;
     }
@@ -66,19 +64,19 @@ static bool acquire_register_lock() {
   }
 
   uint8_t sreg = lock_interrupts();
-  if (reg_view()[REG_READY] != 0) {
+  if (reg_view()[REG_LOCK] != 0) {
     //Мастер стартовал транзакцию между опросом и cli — считаем это таймаутом обмена.
     unlock_interrupts(sreg);
     comm_timeout_error = true;
     return false;
   }
-  reg_view()[REG_READY] = 1;
+  reg_view()[REG_LOCK] = 1;
   unlock_interrupts(sreg);
   return true;
 }
 
 static void release_register_lock() {
-  reg_write_u8_atomic(REG_READY, 0);
+  reg_write_u8_atomic(REG_LOCK, 0);
 }
 
 static uint8_t lock_interrupts() {
@@ -143,30 +141,93 @@ static void reg_write_u32_atomic(uint8_t index_msb, uint32_t value) {
   unlock_interrupts(sreg);
 }
 
+static uint8_t role_caps(byte role) {
+  uint8_t caps = I2CSTEPPER_CAP_RELAY | I2CSTEPPER_CAP_SENSOR;
+  if (role == I2CMIXER) {
+    caps |= I2CSTEPPER_CAP_MIXER;
+  } else {
+    caps |= I2CSTEPPER_CAP_PUMP | I2CSTEPPER_CAP_FILLING;
+  }
+  return caps;
+}
+
+bool mode_supported(byte mode) {
+  if (I2CSTPSetup.role == I2CMIXER) return mode == I2CMIXER;
+  return mode == I2CPUMP || mode == I2CFILLING;
+}
+
+void publish_config_to_registers() {
+  reg_write_u8_atomic(REG_MAGIC, I2CSTEPPER_EEPROM_MARKER);
+  reg_write_u8_atomic(REG_VERSION, I2CSTEPPER_PROTO_VERSION);
+  reg_write_u8_atomic(REG_CAPS, role_caps(I2CSTPSetup.role));
+  reg_write_u8_atomic(REG_ROLE, I2CSTPSetup.role);
+  reg_write_u8_atomic(REG_MODE, I2CSTPSetup.mode);
+  reg_write_u8_atomic(REG_RELAY_MASK, rele_state);
+  reg_write_u8_atomic(REG_SENSOR_FLAGS, I2CSTPSetup.sensorFlags);
+  reg_write_u8_atomic(REG_OPTION_FLAGS, I2CSTPSetup.optionFlags);
+  reg_write_u16_atomic(REG_MIXER_RPM_H, I2CSTPSetup.mixerRpm);
+  reg_write_u16_atomic(REG_MIXER_RUN_H, I2CSTPSetup.mixerRunSec);
+  reg_write_u16_atomic(REG_MIXER_PAUSE_H, I2CSTPSetup.mixerPauseSec);
+  reg_write_u16_atomic(REG_PUMP_MLH_H, I2CSTPSetup.pumpMlHour);
+  reg_write_u16_atomic(REG_PUMP_PAUSE_H, I2CSTPSetup.pumpPauseSec);
+  reg_write_u16_atomic(REG_FILL_ML_H, I2CSTPSetup.fillingMl);
+  reg_write_u16_atomic(REG_FILL_MLH_H, I2CSTPSetup.fillingMlHour);
+  reg_write_u16_atomic(REG_STEPS_PER_ML_H, I2CSTPSetup.stepperStepMl);
+}
+
+void load_session_from_registers() {
+  byte mode = reg_read_u8_atomic(REG_MODE);
+  if (!mode_supported(mode)) {
+    reg_write_u8_atomic(REG_ERROR, I2CSTEP_ERR_UNSUPPORTED_MODE);
+    return;
+  }
+
+  I2CSTPSetup.mode = mode;
+  I2CSTPSetup.relayMask = reg_read_u8_atomic(REG_RELAY_MASK) & 0x0F;
+  I2CSTPSetup.sensorFlags = reg_read_u8_atomic(REG_SENSOR_FLAGS);
+  I2CSTPSetup.optionFlags = reg_read_u8_atomic(REG_OPTION_FLAGS);
+  I2CSTPSetup.mixerRpm = reg_read_u16_atomic(REG_MIXER_RPM_H);
+  I2CSTPSetup.mixerRunSec = reg_read_u16_atomic(REG_MIXER_RUN_H);
+  I2CSTPSetup.mixerPauseSec = reg_read_u16_atomic(REG_MIXER_PAUSE_H);
+  I2CSTPSetup.pumpMlHour = reg_read_u16_atomic(REG_PUMP_MLH_H);
+  I2CSTPSetup.pumpPauseSec = reg_read_u16_atomic(REG_PUMP_PAUSE_H);
+  I2CSTPSetup.fillingMl = reg_read_u16_atomic(REG_FILL_ML_H);
+  I2CSTPSetup.fillingMlHour = reg_read_u16_atomic(REG_FILL_MLH_H);
+  I2CSTPSetup.stepperStepMl = reg_read_u16_atomic(REG_STEPS_PER_ML_H);
+  if (I2CSTPSetup.stepperStepMl < 1) I2CSTPSetup.stepperStepMl = 1;
+  rele_state = I2CSTPSetup.relayMask;
+  last_applied_mask = rele_state;
+  for (byte i = 0; i < 4; i++) {
+    digitalWrite(rele_pin[i], bit_is_set(rele_state, i));
+  }
+  reg_write_u8_atomic(REG_ERROR, I2CSTEP_ERR_NONE);
+  publish_config_to_registers();
+}
+
 static void reg_read_motion_atomic(uint32_t* target, uint16_t* speed, byte* dir) {
   const volatile byte* regs = reg_view();
   uint8_t sreg = lock_interrupts();
-  *speed = ((uint16_t)regs[REG_SPEED_MSB] << 8) | (uint16_t)regs[REG_SPEED_LSB];
-  *dir = regs[REG_DIR];
-  *target = ((uint32_t)regs[REG_TARGET_3] << 24) |
-            ((uint32_t)regs[REG_TARGET_2] << 16) |
-            ((uint32_t)regs[REG_TARGET_1] << 8) |
-            (uint32_t)regs[REG_TARGET_0];
+  *speed = ((uint16_t)regs[REG_CURRENT_SPEED_H] << 8) | (uint16_t)regs[REG_CURRENT_SPEED_L];
+  *dir = regs[REG_OPTION_FLAGS];
+  *target = ((uint32_t)regs[REG_REMAINING_3] << 24) |
+            ((uint32_t)regs[REG_REMAINING_2] << 16) |
+            ((uint32_t)regs[REG_REMAINING_1] << 8) |
+            (uint32_t)regs[REG_REMAINING_0];
   unlock_interrupts(sreg);
 }
 
 static void reg_write_safe_defaults_atomic() {
   volatile byte* regs = reg_view();
   uint8_t sreg = lock_interrupts();
-  regs[REG_SPEED_MSB] = 0;
-  regs[REG_SPEED_LSB] = 0;
-  regs[REG_DIR] = 0;
-  regs[REG_TARGET_3] = 0;
-  regs[REG_TARGET_2] = 0;
-  regs[REG_TARGET_1] = 0;
-  regs[REG_TARGET_0] = 0;
+  regs[REG_CURRENT_SPEED_H] = 0;
+  regs[REG_CURRENT_SPEED_L] = 0;
+  regs[REG_OPTION_FLAGS] = 0;
+  regs[REG_REMAINING_3] = 0;
+  regs[REG_REMAINING_2] = 0;
+  regs[REG_REMAINING_1] = 0;
+  regs[REG_REMAINING_0] = 0;
   regs[REG_RELAY_MASK] = 0;
-  regs[REG_READY] = 0;
+  regs[REG_LOCK] = 0;
   unlock_interrupts(sreg);
 }
 
@@ -195,10 +256,6 @@ static void stepper_snapshot_position_atomic(int32_t* current, int32_t* target_a
     *target_abs = stepper.getTarget();
   }
   resume_stepper_timer(saved_prescale);
-}
-
-static uint32_t u32_diff(uint32_t a, uint32_t b) {
-  return (a > b) ? (a - b) : (b - a);
 }
 
 static void apply_comm_failsafe() {
@@ -246,7 +303,8 @@ bool try_clear_comm_failsafe_latch(void) {
   last_applied_mask = 0;
 
   //Поднимаем TWI обратно с сохранённым slave-адресом. Wire сохраняет ранее зарегистрированные onReceive/onRequest.
-  Wire.begin(I2CSTPSetup.Type);
+  Wire.begin(I2CSTPSetup.role);
+  publish_config_to_registers();
 
   return true;
 }
@@ -295,103 +353,6 @@ static bool sync_relays_from_array() {
   return !process_comm_timeout_event();
 }
 
-static void update_stepper_motion(uint32_t target, uint16_t spd, byte dir) {
-  stepper_state = stepper.getState();
-
-  if (target == 0 || spd == 0) {
-    if (stepper_state) {
-      stop_stepper();
-    }
-    return;
-  }
-
-  if (!stepper_state) {
-    //если в массиве указаны параметры скорости и времени и шаговик не крутит - значит пришли значения от Самовара, запустим
-    start_stepper(false);
-    return;
-  }
-
-  bool need_spd_change = (spd != curr_spd);
-  bool need_dir_change = (dir != last_dir);
-  bool need_set_target = false;
-  int32_t new_target_abs = 0;
-
-  //если режим - миксер и предыдущее оставшееся время отличается от текущего оставшегося времени больше, чем на 1 секунду в любую сторону,
-  //значит это значение пришло от Самовара и нужно синхронизироваться с ним
-  uint32_t remaining_time = get_stepper_time();
-  if (I2CSTPSetup.Type == I2CMIXER && u32_diff(remaining_time, last_set_time) > 1UL) {
-    int32_t current_pos = 0;
-    stepper_snapshot_position_atomic(&current_pos, NULL);
-    uint32_t offset = calc_target_from_time(remaining_time, spd);
-    int64_t target_abs = (int64_t)offset + (int64_t)current_pos;
-    if (target_abs < 0) {
-      target_abs = 0;
-    } else if ((uint64_t)target_abs > STEPPER_TARGET_LIMIT) {
-      target_abs = STEPPER_TARGET_LIMIT;
-    }
-    new_target_abs = (int32_t)target_abs;
-    need_set_target = true;
-  }
-  last_set_time = remaining_time;
-
-  if (need_spd_change || need_dir_change || need_set_target) {
-    uint8_t saved_prescale = pause_stepper_timer();
-    if (need_dir_change) {
-      stepper.brake();
-      stepper.reverse(dir);
-      last_dir = dir;
-      stepper.enable();
-    }
-    if (need_spd_change || need_dir_change) {
-      stepper.setMaxSpeed(spd);
-      stepper.setSpeed(spd, true);
-    }
-    if (need_set_target) {
-      stepper.setAcceleration(stepper_acceleration_from_speed(spd));
-      stepper.setTarget(new_target_abs);
-    }
-    resume_stepper_timer(saved_prescale);
-
-    if (need_spd_change) {
-      curr_spd = spd;
-      set_spd = get_speed();
-#ifdef __I2CStepper_DEBUG
-      Serial.print(F("On changed SSSSSetSpd = "));
-      Serial.println(set_spd);
-      Serial.print(F("Changed spd = "));
-      Serial.println(spd);
-#endif
-    }
-  }
-
-  int32_t current_pos = 0;
-  int32_t target_abs = 0;
-  stepper_snapshot_position_atomic(&current_pos, &target_abs);
-  int32_t crnt_trg = target_abs - current_pos;
-  if (crnt_trg < 0) {
-    crnt_trg = 0;
-  }
-  //синхронизируем текущее положение шаговика с массивом для передачи данных Самовару
-  set_target_to_array((uint32_t)crnt_trg);
-  if (crnt_trg == 0) {
-    stop_stepper();
-  }
-}
-
-static bool sync_stepper_motion_from_array() {
-  uint32_t target = 0;
-  uint16_t spd = 0;
-  byte dir = 0;
-
-  read_motion_from_array(&target, &spd, &dir);
-  if (process_comm_timeout_event()) {
-    return false;
-  }
-
-  update_stepper_motion(target, spd, dir);
-  return !process_comm_timeout_event();
-}
-
 void isrENK() {
   encoder.tick();  // отработка в прерывании
 }
@@ -408,9 +369,9 @@ void setup() {
   read_config();
 
   Wire2.begin();                                      // инициируем подключение к шине I2C в качестве мастера
-  I2C2.begin(*(byte(*)[9]) & REG_Array);               // инициируем возможность чтения/записи данных по шине I2C, из/в указываемый массив
+  I2C2.begin(*(byte(*)[I2CSTEPPER_REG_COUNT]) & REG_Array); // инициируем возможность чтения/записи данных по шине I2C, из/в указываемый массив
   //  stepper.setRunMode(FOLLOW_POS);
-  reg_write_u8_atomic(REG_READY, 0);
+  reg_write_u8_atomic(REG_LOCK, 0);
   set_time_initialized = false;
   set_dir_initialized = false;
   comm_timeout_error = false;
@@ -419,15 +380,23 @@ void setup() {
   pinMode(RELE_PIN2, OUTPUT);                         // используем ногу для вывода
   pinMode(RELE_PIN3, OUTPUT);                         // используем ногу для вывода
   pinMode(RELE_PIN4, OUTPUT);                         // используем ногу для вывода
+  pinMode(EXT_SENSOR_PIN, EXT_SENSOR_INPUT_MODE);
+  rele_state = I2CSTPSetup.relayMask & 0x0F;
+  last_applied_mask = rele_state;
+  for (byte i = 0; i < 4; i++) {
+    digitalWrite(rele_pin[i], bit_is_set(rele_state, i));
+  }
+  publish_config_to_registers();
+  publish_status();
 
   menu_init();                                        // инициализуерм меню экрана
 
   Timer1.initialize(40);                              // инициализируем таймер для упарвления шаговиком
   Timer1.attachInterrupt(stp_tick);
 
-  if (I2CSTPSetup.Type == I2CMIXER) {
+  if (I2CSTPSetup.role == I2CMIXER) {
     Serial.print(F("Mixer "));
-  } else if (I2CSTPSetup.Type == I2CPUMP) {
+  } else if (I2CSTPSetup.role == I2CPUMP) {
     Serial.print(F("Pump "));
   }
   Serial.println(F("ready"));
@@ -457,16 +426,16 @@ uint32_t get_stepper_time_from_array(void) {
   uint32_t target = get_target_from_array();
   uint16_t speed = get_speed_from_array();
 
-  if (I2CSTPSetup.Type == I2CMIXER) {
+  if (I2CSTPSetup.mode == I2CMIXER) {
     //если время
     if (speed == 0) return 0;
     return (target + (speed / 2)) / speed;
   }
 
-  if (I2CSTPSetup.Type == I2CPUMP) {
+  if (I2CSTPSetup.mode == I2CPUMP || I2CSTPSetup.mode == I2CFILLING) {
     //если миллилитры
-    if (I2CSTPSetup.StepperStepMl == 0) return 0;
-    return (uint32_t)(((uint64_t)target * 100ULL + (I2CSTPSetup.StepperStepMl / 2)) / I2CSTPSetup.StepperStepMl);
+    if (I2CSTPSetup.stepperStepMl == 0) return 0;
+    return (uint32_t)(((uint64_t)target + (I2CSTPSetup.stepperStepMl / 2)) / I2CSTPSetup.stepperStepMl);
   }
 
   return 0;
@@ -477,7 +446,7 @@ uint32_t get_target_from_array(void) {
   if (!acquire_register_lock()) {
     return 0;
   }
-  uint32_t value = reg_read_u32_atomic(REG_TARGET_3);
+  uint32_t value = reg_read_u32_atomic(REG_REMAINING_3);
   release_register_lock();
   return value;
 }
@@ -487,16 +456,16 @@ void set_target_to_array(uint32_t target) {
   if (!acquire_register_lock()) {
     return;
   }
-  reg_write_u32_atomic(REG_TARGET_3, target);
+  reg_write_u32_atomic(REG_REMAINING_3, target);
   release_register_lock();
 }
 
 //возвращаем скрость в шагах в секунду из скорости в оборотах/мин
 uint16_t get_spd_stp(uint32_t spd) {
-  if (I2CSTPSetup.Type == I2CMIXER) {
+  if (I2CSTPSetup.mode == I2CMIXER) {
     return stepper_speed_steps_mixer(spd, STEPPER_STEPS);
-  } else if (I2CSTPSetup.Type == I2CPUMP) {
-    return stepper_speed_steps_pump(spd, I2CSTPSetup.StepperStepMl);
+  } else if (I2CSTPSetup.mode == I2CPUMP || I2CSTPSetup.mode == I2CFILLING) {
+    return stepper_speed_steps_pump(spd, I2CSTPSetup.stepperStepMl);
   } else {
     return 0;
   }
@@ -505,28 +474,28 @@ uint16_t get_spd_stp(uint32_t spd) {
 //минимальная user-скорость, при которой get_spd_stp() вернёт хотя бы 1 шаг/с
 //(иначе старт шаговика не произойдёт, но пользователь видит «Start: On»)
 uint32_t get_min_user_speed(void) {
-  if (I2CSTPSetup.Type == I2CMIXER) {
+  if (I2CSTPSetup.mode == I2CMIXER) {
     //(1 * STEPPER_STEPS + 30) / 60 ≥ 1 для STEPPER_STEPS ≥ 30, что всегда верно.
     return 1;
   }
-  if (I2CSTPSetup.Type == I2CPUMP) {
-    if (I2CSTPSetup.StepperStepMl == 0) {
+  if (I2CSTPSetup.mode == I2CPUMP || I2CSTPSetup.mode == I2CFILLING) {
+    if (I2CSTPSetup.stepperStepMl == 0) {
       return 1;
     }
-    //(user * step_ml + 180000) / 360000 ≥ 1 ⟺ user ≥ ceil(180000 / step_ml)
-    uint32_t step_ml = I2CSTPSetup.StepperStepMl;
-    return (180000UL + step_ml - 1UL) / step_ml;
+    //(user * step_ml + 1800) / 3600 ≥ 1 ⟺ user ≥ ceil(1800 / step_ml)
+    uint32_t step_ml = I2CSTPSetup.stepperStepMl;
+    return (1800UL + step_ml - 1UL) / step_ml;
   }
   return 1;
 }
 
 uint32_t get_max_user_speed(void) {
   uint32_t max_spd = 0;
-  if (I2CSTPSetup.Type == I2CMIXER) {
+  if (I2CSTPSetup.mode == I2CMIXER) {
     max_spd = (uint32_t)(65535UL * 60UL) / STEPPER_STEPS;
-  } else if (I2CSTPSetup.Type == I2CPUMP) {
-    if (I2CSTPSetup.StepperStepMl > 0) {
-      max_spd = (uint32_t)(((uint64_t)65535ULL * 360000ULL) / I2CSTPSetup.StepperStepMl);
+  } else if (I2CSTPSetup.mode == I2CPUMP || I2CSTPSetup.mode == I2CFILLING) {
+    if (I2CSTPSetup.stepperStepMl > 0) {
+      max_spd = (uint32_t)(((uint64_t)65535ULL * 3600ULL) / I2CSTPSetup.stepperStepMl);
     }
   }
 
@@ -538,12 +507,12 @@ uint32_t get_max_user_speed(void) {
 }
 
 uint32_t calc_target_from_time(uint32_t time_value, uint16_t spd) {
-  if (I2CSTPSetup.Type == I2CMIXER) {
+  if (I2CSTPSetup.mode == I2CMIXER) {
     return stepper_target_from_time_mixer(time_value, spd, STEPPER_TARGET_LIMIT);
   }
 
-  if (I2CSTPSetup.Type == I2CPUMP) {
-    return stepper_target_from_time_pump(time_value, I2CSTPSetup.StepperStepMl, STEPPER_TARGET_LIMIT);
+  if (I2CSTPSetup.mode == I2CPUMP || I2CSTPSetup.mode == I2CFILLING) {
+    return stepper_target_from_time_pump(time_value, I2CSTPSetup.stepperStepMl, STEPPER_TARGET_LIMIT);
   }
 
   return 0;
@@ -551,16 +520,16 @@ uint32_t calc_target_from_time(uint32_t time_value, uint16_t spd) {
 
 //возвращаем скорость в оборотах/мин или литры в час
 uint32_t get_speed(void) {
-  if (I2CSTPSetup.Type == I2CMIXER) {
+  if (I2CSTPSetup.mode == I2CMIXER) {
     //в об/мин
     if (set_spd == 0 || stepper_state) set_spd = ((float)get_speed_from_array() * 60.0f / STEPPER_STEPS + 0.5f);
-  } else if (I2CSTPSetup.Type == I2CPUMP) {
+  } else if (I2CSTPSetup.mode == I2CPUMP || I2CSTPSetup.mode == I2CFILLING) {
     //в миллилитрах в час
     if (set_spd == 0 || stepper_state) {
-      if (I2CSTPSetup.StepperStepMl == 0) {
+      if (I2CSTPSetup.stepperStepMl == 0) {
         set_spd = 0;
       } else {
-        set_spd = ((float)get_speed_from_array() * 360000.0f / I2CSTPSetup.StepperStepMl + 0.5f);
+        set_spd = ((float)get_speed_from_array() * 3600.0f / I2CSTPSetup.stepperStepMl + 0.5f);
       }
     }
   } else {
@@ -582,7 +551,7 @@ uint16_t get_speed_from_array(void) {
   if (!acquire_register_lock()) {
     return 0;
   }
-  uint16_t value = reg_read_u16_atomic(REG_SPEED_MSB);
+  uint16_t value = reg_read_u16_atomic(REG_CURRENT_SPEED_H);
   release_register_lock();
   return value;
 }
@@ -592,7 +561,7 @@ void set_speed_to_array(uint16_t spd) {
   if (!acquire_register_lock()) {
     return;
   }
-  reg_write_u16_atomic(REG_SPEED_MSB, spd);
+  reg_write_u16_atomic(REG_CURRENT_SPEED_H, spd);
   release_register_lock();
 }
 
@@ -610,7 +579,7 @@ byte get_direction_from_array(void) {
   if (!acquire_register_lock()) {
     return set_dir;
   }
-  byte value = reg_read_u8_atomic(REG_DIR);
+  byte value = reg_read_u8_atomic(REG_OPTION_FLAGS);
   release_register_lock();
   return value;
 }
@@ -620,7 +589,7 @@ void set_direction_to_array(byte dir) {
   if (!acquire_register_lock()) {
     return;
   }
-  reg_write_u8_atomic(REG_DIR, dir);
+  reg_write_u8_atomic(REG_OPTION_FLAGS, dir);
   release_register_lock();
 }
 
@@ -744,6 +713,8 @@ void start_stepper(bool from_int) {
   stepper.setSpeed(spd, true);
   stepper.setTarget((long)target);
   curr_spd = spd;
+  stepper_state = true;
+  pause_phase = false;
   resume_stepper_timer(saved_prescale);
 
   //синхронизируем last_set_time, чтобы первая итерация loop не инициировала ложный time-sync
@@ -759,12 +730,199 @@ void stop_stepper() {
   stepper.disable();
   stepper.setCurrent(0);
   resume_stepper_timer(saved_prescale);
+  curr_spd = 0;
+  stepper_state = false;
+  pause_phase = false;
 
 #ifdef __I2CStepper_DEBUG
   Serial.println(F("======================"));
   Serial.println(F("FINISH STP"));
   Serial.println(F("======================"));
 #endif
+}
+
+bool external_sensor_active() {
+  bool active = digitalRead(EXT_SENSOR_PIN);
+  if (!(I2CSTPSetup.sensorFlags & I2CSTEPPER_SENSOR_ACTIVE_HIGH)) {
+    active = !active;
+  }
+  return active;
+}
+
+static void start_motion(uint16_t spd, uint32_t target, byte dir) {
+  if (spd == 0 || target == 0) {
+    reg_write_u8_atomic(REG_ERROR, I2CSTEP_ERR_BAD_CONFIG);
+    return;
+  }
+  if (target > STEPPER_TARGET_LIMIT) target = STEPPER_TARGET_LIMIT;
+
+  uint8_t saved_prescale = pause_stepper_timer();
+  stepper.brake();
+  stepper.enable();
+  stepper.reverse(dir);
+  stepper.setCurrent(0);
+  if (I2CSTPSetup.optionFlags & I2CSTEPPER_FLAG_SMOOTH_START) {
+    stepper.setAcceleration(stepper_acceleration_from_speed(spd));
+  } else {
+    stepper.setAcceleration(65535);
+  }
+  stepper.setMaxSpeed(spd);
+  stepper.setSpeed(spd, true);
+  stepper.setTarget((long)target);
+  curr_spd = spd;
+  set_dir = dir;
+  last_dir = dir;
+  stepper_state = true;
+  pause_phase = false;
+  set_speed_to_array(spd);
+  set_target_to_array(target);
+  resume_stepper_timer(saved_prescale);
+  reg_write_u8_atomic(REG_ERROR, I2CSTEP_ERR_NONE);
+}
+
+void start_current_mode() {
+  load_session_from_registers();
+  if (reg_read_u8_atomic(REG_ERROR) != I2CSTEP_ERR_NONE) return;
+
+  byte dir = (I2CSTPSetup.optionFlags & I2CSTEPPER_FLAG_DIRECTION) ? 1 : 0;
+  if (I2CSTPSetup.mode == I2CMIXER) {
+    uint16_t spd = stepper_speed_steps_mixer(I2CSTPSetup.mixerRpm, STEPPER_STEPS);
+    uint32_t target = I2CSTPSetup.mixerRunSec > 0
+                    ? stepper_target_from_time_mixer(I2CSTPSetup.mixerRunSec, spd, STEPPER_TARGET_LIMIT)
+                    : STEPPER_TARGET_LIMIT;
+    set_spd = I2CSTPSetup.mixerRpm;
+    set_time = I2CSTPSetup.mixerRunSec;
+    start_motion(spd, target, dir);
+  } else if (I2CSTPSetup.mode == I2CPUMP) {
+    uint16_t spd = stepper_speed_steps_pump(I2CSTPSetup.pumpMlHour, I2CSTPSetup.stepperStepMl);
+    set_spd = I2CSTPSetup.pumpMlHour;
+    set_time = 0;
+    start_motion(spd, STEPPER_TARGET_LIMIT, dir);
+  } else if (I2CSTPSetup.mode == I2CFILLING) {
+    uint16_t spd = stepper_speed_steps_pump(I2CSTPSetup.fillingMlHour, I2CSTPSetup.stepperStepMl);
+    uint32_t target = stepper_target_from_time_pump(I2CSTPSetup.fillingMl, I2CSTPSetup.stepperStepMl, STEPPER_TARGET_LIMIT);
+    set_spd = I2CSTPSetup.fillingMlHour;
+    set_time = I2CSTPSetup.fillingMl;
+    start_motion(spd, target, dir);
+  } else {
+    reg_write_u8_atomic(REG_ERROR, I2CSTEP_ERR_UNSUPPORTED_MODE);
+  }
+}
+
+void start_calibration() {
+  load_session_from_registers();
+  if (I2CSTPSetup.role != I2CPUMP) {
+    reg_write_u8_atomic(REG_ERROR, I2CSTEP_ERR_UNSUPPORTED_MODE);
+    return;
+  }
+  uint16_t speed = stepper_speed_steps_pump(I2CSTPSetup.pumpMlHour ? I2CSTPSetup.pumpMlHour : 100, I2CSTPSetup.stepperStepMl);
+  I2CSTPSetup.mode = I2CPUMP;
+  start_motion(speed, STEPPER_TARGET_LIMIT, 0);
+  calibration_active = true;
+}
+
+void finish_calibration() {
+  uint8_t saved_prescale = pause_stepper_timer();
+  uint32_t done = stepper.getCurrent();
+  resume_stepper_timer(saved_prescale);
+  stop_stepper();
+  calibration_active = false;
+  if (done > 0) {
+    I2CSTPSetup.stepperStepMl = (uint16_t)(done / 100UL);
+    if (I2CSTPSetup.stepperStepMl == 0) I2CSTPSetup.stepperStepMl = 1;
+    reg_write_u16_atomic(REG_STEPS_PER_ML_H, I2CSTPSetup.stepperStepMl);
+  }
+  publish_config_to_registers();
+}
+
+void publish_status() {
+  uint8_t status = 0;
+  bool running = stepper.getState();
+  if (running) status |= I2CSTEPPER_STATUS_RUNNING;
+  if (pause_phase) status |= I2CSTEPPER_STATUS_PAUSED;
+  if (external_sensor_active()) status |= I2CSTEPPER_STATUS_SENSOR;
+  if (calibration_active) status |= I2CSTEPPER_STATUS_CALIBRATION;
+  if (reg_read_u8_atomic(REG_ERROR) != I2CSTEP_ERR_NONE) status |= I2CSTEPPER_STATUS_ERROR;
+  reg_write_u8_atomic(REG_STATUS, status);
+
+  int32_t current = 0;
+  int32_t target_abs = 0;
+  stepper_snapshot_position_atomic(&current, &target_abs);
+  uint32_t remaining_steps = target_abs > current ? (uint32_t)(target_abs - current) : 0;
+  uint32_t remaining = remaining_steps;
+  if (I2CSTPSetup.mode == I2CMIXER) {
+    remaining = curr_spd > 0 ? remaining_steps / curr_spd : 0;
+  } else if (I2CSTPSetup.stepperStepMl > 0) {
+    remaining = remaining_steps / I2CSTPSetup.stepperStepMl;
+  }
+  reg_write_u32_atomic(REG_REMAINING_3, remaining);
+  reg_write_u16_atomic(REG_CURRENT_SPEED_H, running && !pause_phase ? curr_spd : 0);
+}
+
+void update_runtime_state() {
+  if (external_sensor_active()) {
+    if (I2CSTPSetup.sensorFlags & I2CSTEPPER_SENSOR_STOP) {
+      stop_stepper();
+    } else if (I2CSTPSetup.mode == I2CPUMP &&
+               (I2CSTPSetup.sensorFlags & I2CSTEPPER_SENSOR_PUMP_PAUSE) &&
+               I2CSTPSetup.pumpPauseSec > 0) {
+      if (!pause_phase) {
+        uint8_t saved_prescale = pause_stepper_timer();
+        stepper.brake();
+        stepper.disable();
+        resume_stepper_timer(saved_prescale);
+        pause_phase = true;
+      }
+      pause_deadline_ms = millis() + (uint32_t)I2CSTPSetup.pumpPauseSec * 1000UL;
+    }
+  }
+
+  if (pause_phase && (int32_t)(millis() - pause_deadline_ms) >= 0) {
+    pause_phase = false;
+    start_current_mode();
+  }
+
+  if (!pause_phase && !stepper.getState() && stepper_state) {
+    if (I2CSTPSetup.mode == I2CMIXER &&
+        I2CSTPSetup.mixerRunSec > 0 &&
+        I2CSTPSetup.mixerPauseSec > 0) {
+      pause_phase = true;
+      pause_deadline_ms = millis() + (uint32_t)I2CSTPSetup.mixerPauseSec * 1000UL;
+      if (I2CSTPSetup.optionFlags & I2CSTEPPER_FLAG_REVERSE_AFTER_PAUSE) {
+        I2CSTPSetup.optionFlags ^= I2CSTEPPER_FLAG_DIRECTION;
+        reg_write_u8_atomic(REG_OPTION_FLAGS, I2CSTPSetup.optionFlags);
+      }
+    } else {
+      stepper_state = false;
+    }
+  }
+}
+
+void handle_command() {
+  byte seq = reg_read_u8_atomic(REG_COMMAND_SEQ);
+  if (seq == command_seq_seen) return;
+  command_seq_seen = seq;
+  byte cmd = reg_read_u8_atomic(REG_COMMAND);
+
+  if (cmd == I2CSTEP_CMD_APPLY) {
+    load_session_from_registers();
+  } else if (cmd == I2CSTEP_CMD_START) {
+    start_current_mode();
+  } else if (cmd == I2CSTEP_CMD_STOP) {
+    stop_stepper();
+  } else if (cmd == I2CSTEP_CMD_SAVE) {
+    load_session_from_registers();
+    if (reg_read_u8_atomic(REG_ERROR) == I2CSTEP_ERR_NONE) write_config();
+  } else if (cmd == I2CSTEP_CMD_CALIBRATE_START) {
+    start_calibration();
+  } else if (cmd == I2CSTEP_CMD_CALIBRATE_FINISH) {
+    finish_calibration();
+  } else if (cmd == I2CSTEP_CMD_RELAY) {
+    load_session_from_registers();
+  }
+
+  reg_write_u8_atomic(REG_ACK_SEQ, seq);
+  reg_write_u8_atomic(REG_COMMAND, I2CSTEP_CMD_NONE);
 }
 
 //основной цикл
@@ -781,26 +939,48 @@ void loop() {
     return;
   }
 
-  if (!sync_relays_from_array()) {
-    return;
-  }
-  sync_stepper_motion_from_array();
+  handle_command();
+  if (!sync_relays_from_array()) return;
+  update_runtime_state();
+  publish_status();
 }
 
 void read_config() {
   EEPROM.get(0, I2CSTPSetup);
 
-  if (I2CSTPSetup.Type != I2CMIXER && I2CSTPSetup.Type != I2CPUMP) {
-    I2CSTPSetup.Type = I2CMIXER;
+  if (I2CSTPSetup.marker != I2CSTEPPER_EEPROM_MARKER || I2CSTPSetup.version != I2CSTEPPER_PROTO_VERSION) {
+    I2CSTPSetup.marker = I2CSTEPPER_EEPROM_MARKER;
+    I2CSTPSetup.version = I2CSTEPPER_PROTO_VERSION;
+    I2CSTPSetup.role = I2CMIXER;
+    I2CSTPSetup.mode = I2CMIXER;
+    I2CSTPSetup.mixerRpm = 20;
+    I2CSTPSetup.mixerRunSec = 0;
+    I2CSTPSetup.mixerPauseSec = 0;
+    I2CSTPSetup.pumpMlHour = 100;
+    I2CSTPSetup.pumpPauseSec = 0;
+    I2CSTPSetup.fillingMl = 100;
+    I2CSTPSetup.fillingMlHour = 100;
+    I2CSTPSetup.stepperStepMl = 16000;
+    I2CSTPSetup.optionFlags = I2CSTEPPER_FLAG_SMOOTH_START;
+    I2CSTPSetup.sensorFlags = I2CSTEPPER_SENSOR_STOP;
+    I2CSTPSetup.relayMask = 0;
     write_config();
   }
 
-  if (I2CSTPSetup.StepperStepMl > 80000 || I2CSTPSetup.StepperStepMl < 100) {
-    I2CSTPSetup.StepperStepMl = 4500;
+  if (I2CSTPSetup.role != I2CMIXER && I2CSTPSetup.role != I2CPUMP) {
+    I2CSTPSetup.role = I2CMIXER;
+    write_config();
+  }
+  if (!mode_supported(I2CSTPSetup.mode)) {
+    I2CSTPSetup.mode = I2CSTPSetup.role;
+    write_config();
+  }
+  if (I2CSTPSetup.stepperStepMl > 80000 || I2CSTPSetup.stepperStepMl < 1) {
+    I2CSTPSetup.stepperStepMl = 16000;
     write_config();
   }
 
-  Wire.begin(I2CSTPSetup.Type);                       // инициируем подключение к шине I2C в качестве ведомого (slave) устройства, с указанием своего адреса на шине.
+  Wire.begin(I2CSTPSetup.role);                       // инициируем подключение к шине I2C в качестве ведомого (slave) устройства, с указанием своего адреса на шине.
 }
 
 void write_config() {

@@ -71,6 +71,7 @@ const char c_On[] PROGMEM =  "On ";
 const char c_Off[] PROGMEM = "Off";
 const char c_Mixer[] PROGMEM = "Mixer";
 const char c_Pump[] PROGMEM =  "Pump ";
+const char c_Fill[] PROGMEM =  "Fill ";
 const char c_None[] PROGMEM =  "None ";
 
 const char str_BACK[] PROGMEM = "<BACK";
@@ -116,7 +117,7 @@ SetupEEPROM setup_snapshot;
 LiquidMenu main_menu(lcd);
 
 uint32_t get_stp_ml() {
-  return I2CSTPSetup.StepperStepMl;
+  return I2CSTPSetup.stepperStepMl;
 }
 
 const char* get_c_ptr(const char* p_str) {
@@ -127,17 +128,18 @@ const char* get_c_ptr(const char* p_str) {
 
 const char* get_measure(){
   //устанавливаем в меню нужный тип изменерения
-  if (I2CSTPSetup.Type == I2CMIXER) {
+  if (I2CSTPSetup.mode == I2CMIXER) {
     return get_c_ptr(str_STP_Time);
-  } else if (I2CSTPSetup.Type == I2CPUMP) {
+  } else if (I2CSTPSetup.mode == I2CPUMP || I2CSTPSetup.mode == I2CFILLING) {
     return get_c_ptr(str_STP_Ml);
   }
   return get_c_ptr(str_STP_Time);
 }
 
 const char* get_stp_type() {
-  if (I2CSTPSetup.Type == I2CMIXER) return get_c_ptr(c_Mixer);
-  else if (I2CSTPSetup.Type == I2CPUMP) return get_c_ptr(c_Pump);
+  if (I2CSTPSetup.mode == I2CMIXER) return get_c_ptr(c_Mixer);
+  else if (I2CSTPSetup.mode == I2CPUMP) return get_c_ptr(c_Pump);
+  else if (I2CSTPSetup.mode == I2CFILLING) return get_c_ptr(c_Fill);
   else return get_c_ptr(c_None);
 }
 
@@ -177,8 +179,9 @@ int get_stepper_state() {
 
 // Used for attaching something to the lines, to make them focusable.
 void change_type() {
-  I2CSTPSetup.Type++;
-  if (I2CSTPSetup.Type > I2CPUMP ) I2CSTPSetup.Type = I2CMIXER;
+  I2CSTPSetup.mode++;
+  if (I2CSTPSetup.mode > I2CFILLING) I2CSTPSetup.mode = I2CMIXER;
+  I2CSTPSetup.role = (I2CSTPSetup.mode == I2CMIXER) ? I2CMIXER : I2CPUMP;
   setup_dirty = true;
 }
 
@@ -188,8 +191,9 @@ void blankFunction() {
 }
 
 static bool setup_changed(void) {
-  return I2CSTPSetup.Type != setup_snapshot.Type ||
-         I2CSTPSetup.StepperStepMl != setup_snapshot.StepperStepMl;
+  return I2CSTPSetup.role != setup_snapshot.role ||
+         I2CSTPSetup.mode != setup_snapshot.mode ||
+         I2CSTPSetup.stepperStepMl != setup_snapshot.stepperStepMl;
 }
 
 //функция для возврата в основное меню
@@ -216,7 +220,7 @@ void spd_ml_IncFunction() {
   byte c = m_cnt;
   if (c < 3) c = 1;
   else c = c / 3;
-  I2CSTPSetup.StepperStepMl += 1UL * multiplier * c;
+  I2CSTPSetup.stepperStepMl += 1UL * multiplier * c;
   setup_dirty = true;
 }
 
@@ -226,10 +230,10 @@ void spd_ml_DecFunction() {
   if (c < 3) c = 1;
   else c = c / 3;
   uint32_t delta = 1UL * multiplier * c;
-  if (I2CSTPSetup.StepperStepMl <= STEPPER_STEP_ML_MIN + delta) {
-    I2CSTPSetup.StepperStepMl = STEPPER_STEP_ML_MIN;
+  if (I2CSTPSetup.stepperStepMl <= STEPPER_STEP_ML_MIN + delta) {
+    I2CSTPSetup.stepperStepMl = STEPPER_STEP_ML_MIN;
   } else {
-    I2CSTPSetup.StepperStepMl -= delta;
+    I2CSTPSetup.stepperStepMl -= delta;
   }
   setup_dirty = true;
 }

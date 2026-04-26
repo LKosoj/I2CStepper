@@ -18,13 +18,13 @@ static inline uint16_t stepper_speed_steps_mixer(uint32_t user_speed, uint16_t s
   return (uint16_t)speed_steps;
 }
 
-// stepper_step_ml хранится в единицах "шагов на 100 мл".
-// user_speed [мл/ч] * step_ml [шагов/100мл] / (3600 с/ч * 100 мл) = шагов/с.
+// stepper_step_ml хранится в единицах "шагов на 1 мл".
+// user_speed [мл/ч] * step_ml [шагов/мл] / 3600 с/ч = шагов/с.
 static inline uint16_t stepper_speed_steps_pump(uint32_t user_speed, uint32_t stepper_step_ml) {
   if (stepper_step_ml == 0) {
     return 0;
   }
-  uint64_t speed_steps = ((uint64_t)user_speed * stepper_step_ml + 180000ULL) / 360000ULL;
+  uint64_t speed_steps = ((uint64_t)user_speed * stepper_step_ml + 1800ULL) / 3600ULL;
   if (speed_steps > 65535ULL) {
     speed_steps = 65535ULL;
   }
@@ -36,7 +36,7 @@ static inline uint32_t stepper_target_from_time_mixer(uint32_t time_value, uint1
 }
 
 static inline uint32_t stepper_target_from_time_pump(uint32_t volume_ml, uint32_t stepper_step_ml, uint32_t limit) {
-  uint64_t target = ((uint64_t)volume_ml * (uint64_t)stepper_step_ml + 50ULL) / 100ULL;
+  uint64_t target = (uint64_t)volume_ml * (uint64_t)stepper_step_ml;
   return stepper_clamp_target(target, limit);
 }
 
