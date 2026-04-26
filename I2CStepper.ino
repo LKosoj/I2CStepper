@@ -733,6 +733,7 @@ void stop_stepper() {
   curr_spd = 0;
   stepper_state = false;
   pause_phase = false;
+  calibration_active = false;
 
 #ifdef __I2CStepper_DEBUG
   Serial.println(F("======================"));
