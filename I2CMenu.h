@@ -16,6 +16,11 @@
 #include <LiquidMenu.h>
 #include <avr/wdt.h>
 
+namespace glyph {
+extern uint8_t rightFocus[8];
+extern uint8_t customFocus[8];
+}
+
 #define LCD_ADDRESS 0x27
 #define LCD_COLUMNS 16
 #define LCD_ROWS 2
@@ -53,7 +58,6 @@ const char* get_rele_state2();
 const char* get_rele_state3();
 const char* get_rele_state4();
 const char* get_stp_type();
-const char* get_measure();
 uint32_t get_stp_ml();
 bool set_rele_state(byte r, bool s);
 uint32_t get_max_user_speed(void);
@@ -76,25 +80,50 @@ const char c_Fill[] PROGMEM =  "Fill ";
 const char c_None[] PROGMEM =  "None ";
 
 const char str_BACK[] PROGMEM = "<BACK";
-const char str_STP[]  PROGMEM = "STP>";
-const char str_Pmp[]  PROGMEM = ">Pump:";
-const char str_R2[]  PROGMEM = ">Rele2:";
-const char str_R3[]  PROGMEM = ">Rele3:";
-const char str_R4[]  PROGMEM = ">Rele4:";
+const char str_Pmp[]  PROGMEM = "Pump:";
+const char str_R2[]  PROGMEM = "Rele2:";
+const char str_R3[]  PROGMEM = "Rele3:";
+const char str_R4[]  PROGMEM = "Rele4:";
 const char str_SET[]  PROGMEM = "SETUP>";
 const char str_STP_Spd[]  PROGMEM = "STP Spd:";
 const char str_STP_Dir[]  PROGMEM = "STP Dir:";
-const char str_STP_Time[] PROGMEM = "STP Time:";
-const char str_STP_Ml[] PROGMEM = "STP ML:";
 const char str_STP_Start[] PROGMEM = "STP Start:";
 const char str_SET_Type[] PROGMEM = "Type:";
 const char str_SET_Stp_Ml[] PROGMEM = "STP/ML:";
 const char str_SET_Address[] PROGMEM = "I2C Adr:";
+static char motion_line[17];
+
+const char* format_motion_line(bool submenu) {
+  if (I2CSTPSetup.mode == I2CMIXER) {
+    if (submenu) strcpy_P(motion_line, PSTR("STP T:"));
+    else strcpy_P(motion_line, PSTR("STP Time:"));
+    ultoa(get_stepper_time(), motion_line + strlen(motion_line), 10);
+  } else if (I2CSTPSetup.mode == I2CFILLING) {
+    strcpy_P(motion_line, PSTR("STP ML:"));
+    ultoa(get_stepper_time(), motion_line + strlen(motion_line), 10);
+  } else {
+    strcpy_P(motion_line, PSTR("Continuous"));
+  }
+  if (submenu) {
+    char* end = motion_line + strlen(motion_line);
+    *end++ = '>';
+    *end = '\0';
+  }
+  return motion_line;
+}
+
+const char* get_main_motion_line() {
+  return format_motion_line(true);
+}
+
+const char* get_stp_motion_line() {
+  return format_motion_line(false);
+}
 
 LiquidLine back_line_stp(10, 6, str_BACK);
 LiquidLine back_line_setup(10, 6, str_BACK);
 
-LiquidLine main_line1(0, 0, get_measure, get_stepper_time);
+LiquidLine main_line1(0, 0, get_main_motion_line);
 LiquidLine main_line2(0, 1, str_Pmp, get_mixer_pump_state);
 LiquidLine main_line3(0, 2, str_R2, get_rele_state2);
 LiquidLine main_line4(0, 3, str_R3, get_rele_state3);
@@ -104,7 +133,7 @@ LiquidScreen main_screen(main_line1, main_line2);
 
 LiquidLine stp_line_spd(0, 0, str_STP_Spd, get_speed);
 LiquidLine stp_line_dir(0, 1, str_STP_Dir, get_direction);
-LiquidLine stp_line_time(0, 2, get_measure, get_stepper_time);
+LiquidLine stp_line_time(0, 2, get_stp_motion_line);
 LiquidLine stp_line_start(0, 3, str_STP_Start, get_stepper_state_c);
 LiquidScreen stp_screen(stp_line_spd, stp_line_dir, stp_line_time, stp_line_start);
 
@@ -139,16 +168,6 @@ const char* get_c_ptr(const char* p_str) {
   static char buf_g[10];
   strcpy_P(buf_g, p_str);
   return  buf_g;
-}
-
-const char* get_measure(){
-  //устанавливаем в меню нужный тип изменерения
-  if (I2CSTPSetup.mode == I2CMIXER) {
-    return get_c_ptr(str_STP_Time);
-  } else if (I2CSTPSetup.mode == I2CPUMP || I2CSTPSetup.mode == I2CFILLING) {
-    return get_c_ptr(str_STP_Ml);
-  }
-  return get_c_ptr(str_STP_Time);
 }
 
 const char* get_stp_type() {
@@ -238,47 +257,76 @@ static bool setup_changed(void) {
          I2CSTPSetup.stepperStepMl != setup_snapshot.stepperStepMl;
 }
 
+void set_menu_editing(bool editing) {
+  navigate = !editing;
+  lcd.createChar(15, editing ? glyph::customFocus : glyph::rightFocus);
+  main_menu.update();
+}
+
+void show_save_error() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(F("Invalid config"));
+  delay(1000);
+  main_menu.update();
+}
+
+bool save_stp_value() {
+  byte line = main_menu.get_focusedLine();
+  uint32_t* value = NULL;
+  if (line == 0) {
+    value = I2CSTPSetup.mode == I2CMIXER ? &I2CSTPSetup.mixerRpm :
+            (I2CSTPSetup.mode == I2CPUMP ? &I2CSTPSetup.pumpMlHour : &I2CSTPSetup.fillingMlHour);
+  } else if (line == 2) {
+    value = I2CSTPSetup.mode == I2CMIXER ? &I2CSTPSetup.mixerRunSec : &I2CSTPSetup.fillingMl;
+  }
+  if (value != NULL) *value = line == 0 ? set_spd : set_time;
+  return write_config();
+}
+
+bool save_setup_value() {
+  if (!write_config()) return false;
+  snapshot_setup();
+  setup_dirty = false;
+  return true;
+}
+
+void reboot_after_save() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(F("Saved. Reboot!"));
+  delay(500);
+  wdt_enable(WDTO_15MS);
+  while (true) {
+  }
+}
+
 //функция для возврата в основное меню
 void backFunction() {
   if (v3_local_controls_locked()) return;
   //Если выходим из настроек и там реально что-то поменялось — сохранить и перезагрузиться (меняется I2C-адрес)
   if (main_menu.get_currentScreen() == &setup_screen) {
     if (setup_dirty || setup_changed()) {
-      lcd.setCursor(0, 0);
       if (!write_config()) {
-        lcd.print("Invalid config");
+        show_save_error();
         return;
       }
-      lcd.print("Saved. Reboot!");
-      delay(500);
-      wdt_enable(WDTO_15MS);
-      while (true) {
-      }
+      reboot_after_save();
     }
   }
-  navigate = true;
   main_menu.change_screen(&main_screen);
-  main_menu.update();
+  set_menu_editing(false);
 }
 
-//инкремент шагов на 100 мл
-void spd_ml_IncFunction() {
-  if (v3_local_controls_locked()) return;
-  byte c = m_cnt;
-  if (c < 3) c = 1;
-  else c = c / 3;
-  I2CSTPSetup.stepperStepMl += 1UL * multiplier * c;
-  setup_dirty = true;
-}
-
-//декремент шагов на 100 мл
-void spd_ml_DecFunction() {
+void change_steps_per_ml(bool increase_value) {
   if (v3_local_controls_locked()) return;
   byte c = m_cnt;
   if (c < 3) c = 1;
   else c = c / 3;
   uint32_t delta = 1UL * multiplier * c;
-  if (I2CSTPSetup.stepperStepMl <= STEPPER_STEP_ML_MIN + delta) {
+  if (increase_value) {
+    I2CSTPSetup.stepperStepMl += delta;
+  } else if (I2CSTPSetup.stepperStepMl <= STEPPER_STEP_ML_MIN + delta) {
     I2CSTPSetup.stepperStepMl = STEPPER_STEP_ML_MIN;
   } else {
     I2CSTPSetup.stepperStepMl -= delta;
@@ -286,15 +334,23 @@ void spd_ml_DecFunction() {
   setup_dirty = true;
 }
 
-//инкремент скорости шаговика
-void spdIncFunction() {
+//инкремент шагов на 100 мл
+void spd_ml_IncFunction() { change_steps_per_ml(true); }
+
+//декремент шагов на 100 мл
+void spd_ml_DecFunction() { change_steps_per_ml(false); }
+
+void change_speed(bool increase_value) {
   if (v3_local_controls_locked()) return;
   byte c = m_cnt;
   uint32_t max_spd = get_max_user_speed();
   uint32_t min_spd = get_min_user_speed();
   if (c < 3) c = 1;
   else c = c / 3;
-  set_spd += 1UL * multiplier * c;
+  uint32_t delta = 1UL * multiplier * c;
+  if (increase_value) set_spd += delta;
+  else if (set_spd <= min_spd + delta) set_spd = min_spd;
+  else set_spd -= delta;
   if (set_spd > max_spd) set_spd = max_spd;
   if (set_spd < min_spd) set_spd = min_spd;
   if (stepper_state) {
@@ -313,103 +369,62 @@ void spdIncFunction() {
 #endif
 }
 
+//инкремент скорости шаговика
+void spdIncFunction() { change_speed(true); }
+
 //декремент скорости шаговика
-void spdDecFunction() {
+void spdDecFunction() { change_speed(false); }
+
+void change_time(bool increase_value) {
   if (v3_local_controls_locked()) return;
+  if (I2CSTPSetup.mode == I2CPUMP) return;
   byte c = m_cnt;
-  uint32_t min_spd = get_min_user_speed();
   if (c < 3) c = 1;
   else c = c / 3;
   uint32_t delta = 1UL * multiplier * c;
-  if (set_spd <= min_spd + delta) set_spd = min_spd;
-  else set_spd -= delta;
+  if (increase_value) {
+    set_time += delta;
+    if (set_time > 100000) set_time = 100000;
+  } else if (I2CSTPSetup.mode == I2CFILLING && set_time <= delta) {
+    set_time = 1;
+  } else if (set_time <= delta) {
+    set_time = 0;
+  } else {
+    set_time -= delta;
+  }
+  set_time_initialized = true;
+  last_set_time = set_time;
+
   if (stepper_state) {
-    uint16_t s = get_spd_stp(set_spd);
-    set_motion_speed(s);
-    apply_local_motion_settings();
+    uint16_t spd = get_motion_speed();
+    uint32_t target = calc_target_from_time(set_time, spd);
+    set_motion_target(target);
+    uint8_t saved_prescale = pause_stepper_timer();
+    int64_t absolute_target = (int64_t)target + (int64_t)stepper.getCurrent();
+    if (absolute_target < 0) {
+      absolute_target = 0;
+    } else if ((uint64_t)absolute_target > STEPPER_TARGET_LIMIT) {
+      absolute_target = STEPPER_TARGET_LIMIT;
+    }
+    stepper.setTarget((long)absolute_target);
+    resume_stepper_timer(saved_prescale);
   }
 #ifdef __I2CStepper_DEBUG
-  Serial.print(F("SSSSSetSpd = "));
-  Serial.println(set_spd);
-  Serial.print(F("Set spd = "));
-  if (stepper_state) Serial.println(get_spd_stp(set_spd));
+  Serial.print(F("Set time = "));
+  Serial.println(set_time);
+  Serial.print(F("Set target = "));
+  if (stepper_state) Serial.println(calc_target_from_time(set_time, get_motion_speed()));
   else Serial.println(F("n/a"));
-  Serial.print(F("Get spd from array = "));
-  Serial.println(get_motion_speed());
+  Serial.print(F("Get target from array = "));
+  Serial.println(get_motion_target());
 #endif
 }
 
 //инкремент времени работы шаговика
-void timeIncFunction() {
-  if (v3_local_controls_locked()) return;
-  byte c = m_cnt;
-  if (c < 3) c = 1;
-  else c = c / 3;
-  set_time += 1 * multiplier * c;
-  if (set_time > 100000) set_time = 100000;
-  set_time_initialized = true;
-  last_set_time = set_time;
-
-  if (stepper_state) {
-    uint16_t spd = get_motion_speed();
-    uint32_t target = calc_target_from_time(set_time, spd);
-    set_motion_target(target);
-    uint8_t saved_prescale = pause_stepper_timer();
-    int64_t absolute_target = (int64_t)target + (int64_t)stepper.getCurrent();
-    if (absolute_target < 0) {
-      absolute_target = 0;
-    } else if ((uint64_t)absolute_target > STEPPER_TARGET_LIMIT) {
-      absolute_target = STEPPER_TARGET_LIMIT;
-    }
-    stepper.setTarget((long)absolute_target);
-    resume_stepper_timer(saved_prescale);
-  }
-#ifdef __I2CStepper_DEBUG
-  Serial.print(F("Set time = "));
-  Serial.println(set_time);
-  Serial.print(F("Set target = "));
-  if (stepper_state) Serial.println(calc_target_from_time(set_time, get_motion_speed()));
-  else Serial.println(F("n/a"));
-  Serial.print(F("Get target from array = "));
-  Serial.println(get_motion_target());
-#endif
-}
+void timeIncFunction() { change_time(true); }
 
 //декремент времени работы шаговика
-void timeDecFunction() {
-  if (v3_local_controls_locked()) return;
-  byte c = m_cnt;
-  if (c < 3) c = 1;
-  else c = c / 3;
-  if (set_time <= 1 * multiplier * c) set_time = 0;
-  else set_time -= 1 * multiplier * c;
-  set_time_initialized = true;
-  last_set_time = set_time;
-
-  if (stepper_state) {
-    uint16_t spd = get_motion_speed();
-    uint32_t target = calc_target_from_time(set_time, spd);
-    set_motion_target(target);
-    uint8_t saved_prescale = pause_stepper_timer();
-    int64_t absolute_target = (int64_t)target + (int64_t)stepper.getCurrent();
-    if (absolute_target < 0) {
-      absolute_target = 0;
-    } else if ((uint64_t)absolute_target > STEPPER_TARGET_LIMIT) {
-      absolute_target = STEPPER_TARGET_LIMIT;
-    }
-    stepper.setTarget((long)absolute_target);
-    resume_stepper_timer(saved_prescale);
-  }
-#ifdef __I2CStepper_DEBUG
-  Serial.print(F("Set time = "));
-  Serial.println(set_time);
-  Serial.print(F("Set target = "));
-  if (stepper_state) Serial.println(calc_target_from_time(set_time, get_motion_speed()));
-  else Serial.println(F("n/a"));
-  Serial.print(F("Get target from array = "));
-  Serial.println(get_motion_target());
-#endif
-}
+void timeDecFunction() { change_time(false); }
 
 //изменение направления вращения шаговика
 void dirFunction() {
@@ -490,6 +505,7 @@ void menu_init(void) {
   main_menu.change_screen(&main_screen);
   main_menu.update();
   main_menu.set_focusedLine(0);
+  set_menu_editing(false);
   snapshot_setup();
   setup_dirty = false;
 }
@@ -539,21 +555,20 @@ void poll_menu(void) {
     multiplier = 10;
     m_cnt++;
     updscreen = false;
-    main_menu.call_function(increase);
+    if (!navigate) main_menu.call_function(increase);
   } else if (encoder.isLeftH()) {
     multiplier = 10;
     m_cnt++;
     updscreen = false;
-    main_menu.call_function(decrease);
+    if (!navigate) main_menu.call_function(decrease);
   } else if (encoder.isClick()) {
     //main_menu.switch_focus();
     if (main_menu.get_currentScreen() == &main_screen) {
       if (main_menu.get_focusedLine() == 0) {
         updscreen = false;
-        navigate = true;
         main_menu.change_screen(&stp_screen);
         main_menu.set_focusedLine(0);
-        main_menu.update();
+        set_menu_editing(false);
       } else if (main_menu.get_focusedLine() >= 1 && main_menu.get_focusedLine() <= 4) {
         //Переключаем 4 реле
         updscreen = false;
@@ -561,12 +576,11 @@ void poll_menu(void) {
         main_menu.update();
       } else if (main_menu.get_focusedLine() == 5) {
         updscreen = false;
-        navigate = true;
         setup_dirty = false;
         snapshot_setup();
         main_menu.change_screen(&setup_screen);
         main_menu.set_focusedLine(0);
-        main_menu.update();
+        set_menu_editing(false);
       }
     } else if (main_menu.get_currentScreen() == &stp_screen) {
       if (main_menu.get_focusedLine() == 4) {
@@ -577,16 +591,39 @@ void poll_menu(void) {
         else start_stepper(true);
       } else if (main_menu.get_focusedLine() == 1) {
         dirFunction();
+        updscreen = false;
+        if (!save_stp_value()) show_save_error();
+        else main_menu.update();
+      } else if (main_menu.get_focusedLine() == 2 && I2CSTPSetup.mode == I2CPUMP) {
+        updscreen = false;
+        main_menu.update();
+      } else if (navigate) {
+        updscreen = false;
+        set_menu_editing(true);
+      } else {
+        updscreen = false;
+        if (!save_stp_value()) show_save_error();
+        else set_menu_editing(false);
       }
-      else navigate = !navigate;
     } else if (main_menu.get_currentScreen() == &setup_screen) {
       if (main_menu.get_focusedLine() == 3) {
         updscreen = false;
         backFunction();
+      } else if (navigate) {
+        updscreen = false;
+        set_menu_editing(true);
+      } else {
+        updscreen = false;
+        bool address_changed = v3_staging_config.address != v3_runtime_address;
+        if (!save_setup_value()) {
+          show_save_error();
+        } else if (address_changed) {
+          reboot_after_save();
+        } else {
+          set_menu_editing(false);
+        }
       }
-      else navigate = !navigate;
     }
-    else navigate = !navigate;
   }
   uint32_t currS = millis() / 1000;
   if (currS != oldS) {

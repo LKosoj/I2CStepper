@@ -21,6 +21,7 @@ Use this checklist after flashing firmware to validate real hardware behavior wi
 - Start command begins movement.
 - With smooth start disabled, Stop halts movement immediately; with smooth start enabled, a finite move decelerates before it stops.
 - Remaining time/volume decrements consistently.
+- Confirm edited speed, time/volume and direction, power-cycle the Nano and verify that all confirmed values were restored.
 
 3. Direction change while running:
 - Direction toggles without lockup.
@@ -65,6 +66,7 @@ Use this checklist after flashing firmware to validate real hardware behavior wi
 - Speed units: ml/h.
 - Target and remaining units: ml.
 - Stepper stops after configured fill volume.
+- Driver EN is inactive after the configured fill volume completes.
 - `Fill` uses the pump I2C role/address, not a separate I2C address.
 
 ## I2C Protocol v3 Checks

@@ -4,7 +4,9 @@
 /.venv
 /.venv-pio
 /.pio
+/.attachments/
 AGENTS.md
 GEMINI.md
 CLAUDE.md
 QWEN.md
+.cli-proxy/runtime/

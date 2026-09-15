@@ -543,13 +543,15 @@ int main() {
 typedef uint8_t byte;
 #define I2CMIXER 1U
 #define I2CPUMP 2U
+#define I2CFILLING 3U
 #define I2CSTEPPER_SENSOR_STOP 0x01U
 #define I2CSTEPPER_SENSOR_PUMP_PAUSE 0x04U
 struct FakeStepper {
   bool running = false;
+  uint8_t disables = 0;
   bool getState() const { return running; }
   void brake() { running = false; }
-  void disable() {}
+  void disable() { disables++; }
 } stepper;
 struct Setup { uint8_t sensorFlags; uint8_t mode; uint32_t mixerRunSec; uint32_t mixerPauseSec; uint32_t pumpPauseSec; } I2CSTPSetup = {};
 bool v3_mixer_deadline_active = false;
@@ -611,7 +613,16 @@ int main() {
   I2CSTPSetup.mode = I2CPUMP;
   v3_status_snapshot.stopReason = I2CSTEPPER_V3_STOP_NONE;
   update_runtime_state();
-  assert(!stepper_state && v3_status_snapshot.stopReason == I2CSTEPPER_V3_STOP_COMPLETE);
+  assert(!stepper_state && stepper.disables == 0U &&
+         v3_status_snapshot.stopReason == I2CSTEPPER_V3_STOP_COMPLETE);
+
+  stepper_state = true;
+  stepper.running = false;
+  I2CSTPSetup.mode = I2CFILLING;
+  v3_status_snapshot.stopReason = I2CSTEPPER_V3_STOP_NONE;
+  update_runtime_state();
+  assert(!stepper_state && stepper.disables == 1U &&
+         v3_status_snapshot.stopReason == I2CSTEPPER_V3_STOP_COMPLETE);
   return 0;
 }
 '''.replace("@RUNTIME@", runtime_definition)
@@ -1257,6 +1268,20 @@ def main():
     assert "if (get_stepper_state()) stop_stepper();" not in poll_menu
     assert "setup_line1.attach_function(increase, change_type);" in menu
     assert "setup_line1.attach_function(decrease, change_type);" in menu
+    assert 'const char str_Pmp[]  PROGMEM = "Pump:";' in menu
+    assert 'const char str_R2[]  PROGMEM = "Rele2:";' in menu
+    assert "*end++ = '>';" in menu
+    assert 'PSTR("Continuous")' in menu
+    assert "void set_menu_editing(bool editing)" in menu
+    assert "editing ? glyph::customFocus : glyph::rightFocus" in menu
+    assert "bool save_stp_value()" in menu
+    assert "&I2CSTPSetup.fillingMlHour" in menu
+    assert "&I2CSTPSetup.fillingMl" in menu
+    assert "*value = line == 0 ? set_spd : set_time" in menu
+    assert "return write_config();" in menu
+    assert "main_menu.get_focusedLine() == 2 && I2CSTPSetup.mode == I2CPUMP" in poll_menu
+    assert "if (!navigate) main_menu.call_function(increase);" in poll_menu
+    assert "if (!navigate) main_menu.call_function(decrease);" in poll_menu
 
     config_valid = function_body("static bool v3_config_valid(const I2CStepperV3Config& config)")
     require(config_valid, "targetRequired")
@@ -1276,6 +1301,11 @@ def main():
     runtime = function_body("void update_runtime_state()")
     require(runtime, "I2CSTEPPER_V3_STOP_SENSOR")
     require(runtime, "I2CSTEPPER_V3_STOP_COMPLETE")
+    require(runtime, "if (I2CSTPSetup.mode == I2CFILLING) stepper.disable()")
+    apply_runtime = function_body("static void v3_apply_to_runtime()")
+    require(apply_runtime, "I2CSTPSetup.fillingMlHour")
+    require(apply_runtime, "I2CSTPSetup.fillingMl")
+    require(apply_runtime, "I2CSTPSetup.pumpMlHour")
     menu = (ROOT / "I2CMenu.h").read_text()
     assert "apply_local_motion_settings();" in menu
     source_derived_production_harnesses()

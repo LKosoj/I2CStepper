@@ -223,6 +223,14 @@ static void v3_apply_to_runtime() {
   I2CSTPSetup.fillingMlHour = v3_active_config.fillingMlHour;
   I2CSTPSetup.stepperStepMl = v3_active_config.stepsPerMl;
   rele_state = v3_active_config.relayMask;
+  set_spd = I2CSTPSetup.mode == I2CMIXER ? I2CSTPSetup.mixerRpm :
+            (I2CSTPSetup.mode == I2CPUMP ? I2CSTPSetup.pumpMlHour : I2CSTPSetup.fillingMlHour);
+  set_time = I2CSTPSetup.mode == I2CMIXER ? I2CSTPSetup.mixerRunSec :
+             (I2CSTPSetup.mode == I2CFILLING ? I2CSTPSetup.fillingMl : 0);
+  last_set_time = set_time;
+  set_dir = (I2CSTPSetup.optionFlags & I2CSTEPPER_FLAG_DIRECTION) ? 1 : 0;
+  set_time_initialized = true;
+  set_dir_initialized = true;
 }
 
 static void v3_publish_runtime_identity(I2CStepperV3Identity* identity) {
@@ -591,8 +599,6 @@ void setup() {
 
   Wire2.begin();                                      // инициируем подключение к шине I2C в качестве мастера
   //  stepper.setRunMode(FOLLOW_POS);
-  set_time_initialized = false;
-  set_dir_initialized = false;
   pinMode(MIXER_PUMP_PIN, OUTPUT);                    // используем ногу для вывода
   pinMode(RELE_PIN2, OUTPUT);                         // используем ногу для вывода
   pinMode(RELE_PIN3, OUTPUT);                         // используем ногу для вывода
@@ -1091,6 +1097,7 @@ void update_runtime_state() {
         I2CSTPSetup.mixerPauseSec > 0) {
       finish_mixer_run_phase();
     } else {
+      if (I2CSTPSetup.mode == I2CFILLING) stepper.disable();
       stepper_state = false;
       v3_status_snapshot.stopReason = I2CSTEPPER_V3_STOP_COMPLETE;
     }
