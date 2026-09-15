@@ -41,12 +41,17 @@ jobs:
             --std=c++11 \
             --suppress=missingIncludeSystem \
             --error-exitcode=1 \
-            I2CStepper.ino I2CMenu.h I2CStepper.h
+            I2CStepper.ino I2CMenu.h I2CStepper.h I2CStepperRuntime.h
 
-      - name: Host Math Tests
+      - name: Host Tests
         run: |
           g++ -std=c++11 -Wall -Wextra -pedantic -I. tests/stepper_math_test.cpp -o /tmp/stepper_math_test
           /tmp/stepper_math_test
+          g++ -std=c++11 -Wall -Wextra -pedantic -I. -ISamovar/libraries/I2CStepperProtocol/src tests/i2c_protocol_v3_test.cpp -o /tmp/i2c_protocol_v3_test
+          /tmp/i2c_protocol_v3_test
+          g++ -std=c++11 -Wall -Wextra -pedantic -I. tests/i2c_stepper_runtime_test.cpp -o /tmp/i2c_stepper_runtime_test
+          /tmp/i2c_stepper_runtime_test
+          python3 tests/i2c_stepper_v3_runtime_test.py
 
       - name: PlatformIO Build
         run: pio run

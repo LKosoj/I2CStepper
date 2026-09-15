@@ -18,13 +18,15 @@
 
 `Mixer` использует роль/адрес `I2CMIXER`, а `Pump` и `Fill` используют роль/адрес `I2CPUMP`. Выбор режима выполняется в меню `Setup` (`Mixer` / `Pump` / `Fill`). После изменения режима или `STP/ML` устройство сохраняет настройки и перезагружается, чтобы Samovar видел корректную роль I2C.
 
-Для насосных режимов `STP/ML` хранит количество шагов на 1 мл. Команды калибровки по I2C рассчитаны на пролив 100 мл: `CALIBRATE_START` запускает насос, `CALIBRATE_FINISH` останавливает его и пересчитывает `STP/ML` как пройденные шаги / 100. Чтобы сохранить результат в EEPROM, после калибровки нужно отправить команду `SAVE`.
+Для насосных режимов `STP/ML` хранит количество шагов на 1 мл. Команды калибровки по I2C рассчитаны на пролив 100 мл: `CALIBRATE_START` запускает насос, `CALIBRATE_FINISH` останавливает его, пересчитывает `STP/ML` как пройденные шаги / 100 и сохраняет результат в EEPROM с readback-проверкой.
 
-При зависании I2C устройство переходит в fail-safe: шаговик останавливается, все реле выключаются. После восстановления шины требуется явное подтверждение кликом энкодера, чтобы снять блокировку.
+В v3 Samovar посылает heartbeat раз в 250 мс каждому Nano, включая простой. Пока heartbeat не старше 1000 мс, локальные органы управления заблокированы, кроме локального STOP. При потере heartbeat Nano всегда выключает удалённо управляемые реле; `HEARTBEAT_TIMEOUT` показывается только если в этот момент шли удалённое движение, пауза или калибровка. Локальный запуск heartbeat не требует.
 
-Начиная с протокола v2 EEPROM хранит `role`, `mode`, настройки Mixer/Pump/Fill, флаги опций, флаги внешнего датчика, маску реле и `STP/ML`. При несовпадении версии EEPROM инициализируется значениями по умолчанию, поэтому после обновления прошивки нужно проверить режим и калибровку насоса.
+EEPROM v3 хранит CONFIG_A/B с CRC-16 и readback-проверкой. Старый v2 переносится один раз; значения по умолчанию записываются только в полностью пустую EEPROM. Повреждённая или неизвестная непустая EEPROM не заменяется настройками: движение блокируется с ошибкой `EEPROM_INVALID`.
 
-I2C-протокол v2 описан отдельно: [`docs/i2c-protocol-v2.md`](docs/i2c-protocol-v2.md).
+Проверка компилятора ограничивает статические глобальные данные v3 320 байтами. Итоговый запас стека на реальном Nano зависит от библиотеки LCD и прерываний, поэтому после прошивки нужен аппаратный сценарий с одновременными LCD, I2C и энкодером.
+
+Спецификация текущего протокола: [`docs/i2c-protocol-v3.md`](docs/i2c-protocol-v3.md). v2 сохранён только как локальный формат EEPROM для миграции, без wire-протокола.
 
 В дальнейшем возможно расширение другими устройствами.
 
@@ -47,8 +49,11 @@ pio run
 
 - CI: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 - Локальный host-тест математики: `g++ -std=c++11 -Wall -Wextra -pedantic -I. tests/stepper_math_test.cpp -o /tmp/stepper_math_test && /tmp/stepper_math_test`
+- Общий заголовок v3 для Arduino IDE: `../Samovar/libraries/I2CStepperProtocol/src/I2CStepperV3.h` (библиотека `I2CStepperProtocol`).
+- Локальный host-тест протокола v3: `g++ -std=c++11 -Wall -Wextra -pedantic -I. -I../Samovar/libraries/I2CStepperProtocol/src tests/i2c_protocol_v3_test.cpp -o /tmp/i2c_protocol_v3_test && /tmp/i2c_protocol_v3_test`
+- Локальный host-тест EEPROM/mailbox v3: `g++ -std=c++11 -Wall -Wextra -pedantic -I. tests/i2c_stepper_runtime_test.cpp -o /tmp/i2c_stepper_runtime_test && /tmp/i2c_stepper_runtime_test`
+- Исходниковый host-тест v3 runtime/Timer1: `python3 tests/i2c_stepper_v3_runtime_test.py`
 - Аппаратный чек-лист: [`docs/hardware-test-checklist.md`](docs/hardware-test-checklist.md)
-- I2C-протокол v2: [`docs/i2c-protocol-v2.md`](docs/i2c-protocol-v2.md)
 
 Подключение периферии:
 
