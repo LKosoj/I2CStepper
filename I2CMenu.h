@@ -91,25 +91,26 @@ const char str_STP_Start[] PROGMEM = "STP Start:";
 const char str_SET_Type[] PROGMEM = "Type:";
 const char str_SET_Stp_Ml[] PROGMEM = "STP/ML:";
 const char str_SET_Address[] PROGMEM = "I2C Adr:";
-static char motion_line[17];
+//общий буфер текста меню: LiquidMenu печатает результат геттера сразу после вызова
+static char menu_text[17];
 
 const char* format_motion_line(bool submenu) {
   if (I2CSTPSetup.mode == I2CMIXER) {
-    if (submenu) strcpy_P(motion_line, PSTR("STP T:"));
-    else strcpy_P(motion_line, PSTR("STP Time:"));
-    ultoa(get_stepper_time(), motion_line + strlen(motion_line), 10);
+    if (submenu) strcpy_P(menu_text, PSTR("STP T:"));
+    else strcpy_P(menu_text, PSTR("STP Time:"));
+    ultoa(get_stepper_time(), menu_text + strlen(menu_text), 10);
   } else if (I2CSTPSetup.mode == I2CFILLING) {
-    strcpy_P(motion_line, PSTR("STP ML:"));
-    ultoa(get_stepper_time(), motion_line + strlen(motion_line), 10);
+    strcpy_P(menu_text, PSTR("STP ML:"));
+    ultoa(get_stepper_time(), menu_text + strlen(menu_text), 10);
   } else {
-    strcpy_P(motion_line, PSTR("Continuous"));
+    strcpy_P(menu_text, PSTR("Continuous"));
   }
   if (submenu) {
-    char* end = motion_line + strlen(motion_line);
+    char* end = menu_text + strlen(menu_text);
     *end++ = '>';
     *end = '\0';
   }
-  return motion_line;
+  return menu_text;
 }
 
 const char* get_main_motion_line() {
@@ -120,8 +121,7 @@ const char* get_stp_motion_line() {
   return format_motion_line(false);
 }
 
-LiquidLine back_line_stp(10, 6, str_BACK);
-LiquidLine back_line_setup(10, 6, str_BACK);
+LiquidLine back_line(10, 6, str_BACK);
 
 LiquidLine main_line1(0, 0, get_main_motion_line);
 LiquidLine main_line2(0, 1, str_Pmp, get_mixer_pump_state);
@@ -141,7 +141,7 @@ LiquidLine setup_line1(0, 0, str_SET_Type, get_stp_type);
 LiquidLine setup_line2(0, 1, str_SET_Stp_Ml, get_stp_ml);
 uint8_t get_i2c_address() { return v3_staging_config.address; }
 LiquidLine setup_line3(0, 2, str_SET_Address, get_i2c_address);
-LiquidScreen setup_screen(setup_line1, setup_line2, setup_line3, back_line_setup);
+LiquidScreen setup_screen(setup_line1, setup_line2, setup_line3, back_line);
 
 //«грязный» флаг — пишем конфиг и перезагружаемся только если в setup что-то реально поменялось
 bool setup_dirty = false;
@@ -165,9 +165,8 @@ uint32_t get_stp_ml() {
 }
 
 const char* get_c_ptr(const char* p_str) {
-  static char buf_g[10];
-  strcpy_P(buf_g, p_str);
-  return  buf_g;
+  strcpy_P(menu_text, p_str);
+  return menu_text;
 }
 
 const char* get_stp_type() {
@@ -400,11 +399,15 @@ void change_time(bool increase_value) {
     uint32_t target = calc_target_from_time(set_time, spd);
     set_motion_target(target);
     uint8_t saved_prescale = pause_stepper_timer();
-    int64_t absolute_target = (int64_t)target + (int64_t)stepper.getCurrent();
-    if (absolute_target < 0) {
-      absolute_target = 0;
-    } else if ((uint64_t)absolute_target > STEPPER_TARGET_LIMIT) {
-      absolute_target = STEPPER_TARGET_LIMIT;
+    //target <= STEPPER_TARGET_LIMIT, поэтому сумма с текущей позицией считается без 64 бит
+    int32_t current = stepper.getCurrent();
+    uint32_t absolute_target;
+    if (current < 0) {
+      int32_t sum = (int32_t)target + current;
+      absolute_target = sum < 0 ? 0 : (uint32_t)sum;
+    } else {
+      absolute_target = target + (uint32_t)current;
+      if (absolute_target > STEPPER_TARGET_LIMIT) absolute_target = STEPPER_TARGET_LIMIT;
     }
     stepper.setTarget((long)absolute_target);
     resume_stepper_timer(saved_prescale);
@@ -443,8 +446,7 @@ void menu_init(void) {
   lcd.clear();
   navigate = true;
 
-  back_line_stp.attach_function(1, backFunction);
-  back_line_setup.attach_function(1, backFunction);
+  back_line.attach_function(1, backFunction);
 
   main_line1.attach_function(1, blankFunction);
   main_line2.attach_function(1, blankFunction);
@@ -458,7 +460,7 @@ void menu_init(void) {
   main_line5.attach_function(1, blankFunction);
   main_line6.attach_function(1, blankFunction);
 
-  stp_screen.add_line(back_line_stp);
+  stp_screen.add_line(back_line);
 
   stp_line_spd.attach_function(increase, spdIncFunction);
   stp_line_spd.attach_function(decrease, spdDecFunction);
@@ -483,8 +485,7 @@ void menu_init(void) {
   stp_screen.set_displayLineCount(2);
   setup_screen.set_displayLineCount(2);
 
-  back_line_stp.set_asProgmem(1);
-  back_line_setup.set_asProgmem(1);
+  back_line.set_asProgmem(1);
   main_line2.set_asProgmem(1);
   main_line3.set_asProgmem(1);
   main_line4.set_asProgmem(1);

@@ -72,6 +72,7 @@ def source_derived_production_harnesses():
 
 #include <I2CStepperV3.h>
 #include "I2CStepperRuntime.h"
+#include "StepperMath.h"
 #define STEPPER_STEPS (200U * 2U)
 @CONFIG_VALID@
 

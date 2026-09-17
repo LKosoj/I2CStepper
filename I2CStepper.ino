@@ -193,12 +193,12 @@ static bool v3_config_valid(const I2CStepperV3Config& config) {
   uint64_t speed = 0;
   uint64_t target = 0;
   if (config.mode == I2CSTEPPER_V3_MODE_MIXER) {
-    speed = ((uint64_t)config.mixerRpm * STEPPER_STEPS + 30ULL) / 60ULL;
+    speed = stepper_rate_steps(config.mixerRpm, STEPPER_STEPS, 60U);
     if (config.mixerRunSec > 0) target = speed * config.mixerRunSec;
   } else if (config.mode == I2CSTEPPER_V3_MODE_PUMP) {
-    speed = ((uint64_t)config.pumpMlHour * config.stepsPerMl + 1800ULL) / 3600ULL;
+    speed = stepper_rate_steps(config.pumpMlHour, config.stepsPerMl, 3600U);
   } else {
-    speed = ((uint64_t)config.fillingMlHour * config.stepsPerMl + 1800ULL) / 3600ULL;
+    speed = stepper_rate_steps(config.fillingMlHour, config.stepsPerMl, 3600U);
     target = (uint64_t)config.fillingMl * config.stepsPerMl;
   }
   bool targetRequired = config.mode == I2CSTEPPER_V3_MODE_FILLING ||
@@ -486,7 +486,7 @@ void v3_process_receive() {
         } else if (stepper.getState() || calibration_active) {
           v3_set_result(command.commandSeq, I2CSTEPPER_V3_RESULT_FAILED, I2CSTEPPER_V3_ERR_BAD_CONFIG);
         } else {
-          uint64_t speed = ((uint64_t)v3_active_config.pumpMlHour * v3_active_config.stepsPerMl + 1800ULL) / 3600ULL;
+          uint64_t speed = stepper_rate_steps(v3_active_config.pumpMlHour, v3_active_config.stepsPerMl, 3600U);
           if (speed < 1 || speed > I2CSTEPPER_V3_MAX_SPEED_STEPS_PER_SEC) {
             v3_set_result(command.commandSeq, I2CSTEPPER_V3_RESULT_FAILED, I2CSTEPPER_V3_ERR_BAD_CONFIG);
           } else {
@@ -661,7 +661,9 @@ uint32_t get_stepper_time_from_motion(void) {
   if (I2CSTPSetup.mode == I2CPUMP || I2CSTPSetup.mode == I2CFILLING) {
     //если миллилитры
     if (I2CSTPSetup.stepperStepMl == 0) return 0;
-    return (uint32_t)(((uint64_t)target + (I2CSTPSetup.stepperStepMl / 2)) / I2CSTPSetup.stepperStepMl);
+    //округление к ближайшему без 64 бит: +1, если остаток не меньше половины делителя
+    uint32_t step_ml = I2CSTPSetup.stepperStepMl;
+    return target / step_ml + (target % step_ml >= step_ml - step_ml / 2 ? 1 : 0);
   }
 
   return 0;
@@ -717,7 +719,7 @@ uint32_t get_max_user_speed(void) {
     max_spd = (uint32_t)(STEPPER_MAX_SPEED * 60UL) / STEPPER_STEPS;
   } else if (I2CSTPSetup.mode == I2CPUMP || I2CSTPSetup.mode == I2CFILLING) {
     if (I2CSTPSetup.stepperStepMl > 0) {
-      max_spd = (uint32_t)(((uint64_t)STEPPER_MAX_SPEED * 3600ULL) / I2CSTPSetup.stepperStepMl);
+      max_spd = (STEPPER_MAX_SPEED * 3600UL) / I2CSTPSetup.stepperStepMl;
     }
   }
 
@@ -744,14 +746,14 @@ uint32_t calc_target_from_time(uint32_t time_value, uint16_t spd) {
 uint32_t get_speed(void) {
   if (I2CSTPSetup.mode == I2CMIXER) {
     //в об/мин
-    if (set_spd == 0 || stepper_state) set_spd = ((float)get_motion_speed() * 60.0f / STEPPER_STEPS + 0.5f);
+    if (set_spd == 0 || stepper_state) set_spd = (get_motion_speed() * 60UL + STEPPER_STEPS / 2) / STEPPER_STEPS;
   } else if (I2CSTPSetup.mode == I2CPUMP || I2CSTPSetup.mode == I2CFILLING) {
     //в миллилитрах в час
     if (set_spd == 0 || stepper_state) {
       if (I2CSTPSetup.stepperStepMl == 0) {
         set_spd = 0;
       } else {
-        set_spd = ((float)get_motion_speed() * 3600.0f / I2CSTPSetup.stepperStepMl + 0.5f);
+        set_spd = (get_motion_speed() * 3600UL + I2CSTPSetup.stepperStepMl / 2) / I2CSTPSetup.stepperStepMl;
       }
     }
   } else {
