@@ -88,9 +88,14 @@ static inline void i2cstepper_v3_claim_remote_ownership(bool* remoteOwner,
   *lastHeartbeatMs = nowMs;
 }
 
+// Сколько Nano ждёт «пульс» Самовара, прежде чем остановить мотор и снять реле.
+// 10 с: короткая занятость Самовара (запись файла, обмен с другим устройством) не должна
+// останавливать процесс.
+#define I2CSTEPPER_V3_HEARTBEAT_TIMEOUT_MS 10000UL
+
 static inline bool i2cstepper_v3_heartbeat_expired(bool remoteOwner, uint32_t nowMs,
                                                     uint32_t lastHeartbeatMs) {
-  return remoteOwner && (uint32_t)(nowMs - lastHeartbeatMs) > 1000UL;
+  return remoteOwner && (uint32_t)(nowMs - lastHeartbeatMs) > I2CSTEPPER_V3_HEARTBEAT_TIMEOUT_MS;
 }
 
 static inline void i2cstepper_v3_acknowledge_sequence(uint32_t sequence,

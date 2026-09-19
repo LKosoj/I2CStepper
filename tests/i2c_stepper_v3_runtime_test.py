@@ -511,7 +511,7 @@ int main() {
          v3_active_config.relayMask == 0x0FU && I2CSTPSetup.relayMask == 0x0FU);
   for (uint8_t index = 0; index < 4; index++) assert(relay_levels[index] == 1U);
 
-  fake_now = 1101U;
+  fake_now = 10101U;
   if (i2cstepper_v3_heartbeat_expired(v3_remote_owner, fake_now, v3_last_heartbeat_ms)) {
     v3_stop_remote_for_timeout();
     v3_remote_owner = false;

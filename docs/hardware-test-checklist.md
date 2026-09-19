@@ -74,7 +74,7 @@ Use this checklist after flashing firmware to validate real hardware behavior wi
 - Read IDENTITY, STATUS, CONFIG_A, CONFIG_B and MOTION as complete frames; no read response exceeds 32 bytes.
 - Write a register pointer plus at most 31 payload bytes. Confirm that an incomplete staging configuration does not change active CONFIG_A/B until `APPLY` or `SAVE`.
 - Send CONFIG_A, CONFIG_B, MOTION and COMMAND without an intervening loop iteration. Confirm all four are consumed in that order. A second packet for an already pending register is discarded, preserving the first packet.
-- Send heartbeat every 250 ms while the device is present, including idle. Confirm that local controls lock, local STOP still works once, and all remotely controlled relays deenergize after more than 1000 ms without heartbeat. During remote motion, pause or calibration STATUS reports `HEARTBEAT_TIMEOUT` and `STOP_HEARTBEAT`; idle expiry after successful remote STOP keeps that successful result.
+- Send heartbeat every 250 ms while the device is present, including idle. Confirm that local controls lock, local STOP still works once, and all remotely controlled relays deenergize after more than 10000 ms (10 s) without heartbeat. During remote motion, pause or calibration STATUS reports `HEARTBEAT_TIMEOUT` and `STOP_HEARTBEAT`; idle expiry after successful remote STOP keeps that successful result.
 - Change address with `SAVE`, verify the new address/configuration is persisted, then reboot before addressing Nano at the new physical I2C address.
 
 1. Read IDENTITY:
