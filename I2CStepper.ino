@@ -79,13 +79,6 @@ static void v3_default_config(I2CStepperV3Config* config) {
   config->stepsPerMl = 16000;
 }
 
-static bool v3_eeprom_blank() {
-  for (uint16_t i = 0; i < EEPROM.length(); i++) {
-    if (EEPROM.read(i) != 0xFFU) return false;
-  }
-  return true;
-}
-
 static I2CStepperV3EepromState v3_eeprom_read(I2CStepperV3Config* config) {
   uint8_t record[V3_EEPROM_SIZE];
   for (uint8_t i = 0; i < V3_EEPROM_SIZE; i++) record[i] = EEPROM.read(V3_EEPROM_OFFSET + i);
@@ -1135,15 +1128,29 @@ void read_config() {
     hasV2Header = legacy.marker == I2CSTEPPER_V2_EEPROM_MARKER &&
                   legacy.version == I2CSTEPPER_V2_EEPROM_VERSION;
   }
+  const uint8_t legacyType = EEPROM.read(0);
   I2CStepperV3BootAction bootAction = i2cstepper_v3_boot_action(
-      eepromState, hasV2Header, eepromState == I2CSTEPPER_V3_EEPROM_ABSENT && v3_eeprom_blank());
+      eepromState, hasV2Header,
+      legacyType == I2CSTEPPER_V2_ROLE_MIXER || legacyType == I2CSTEPPER_V2_ROLE_PUMP);
   if (bootAction == I2CSTEPPER_V3_BOOT_USE_V3) {
     v3_movement_allowed = true;
   } else if (bootAction == I2CSTEPPER_V3_BOOT_MIGRATE_V2) {
-    if (i2cstepper_v3_migrate_v2_config(&legacy, &v3_active_config) &&
-        v3_config_valid(v3_active_config) && v3_eeprom_write(v3_active_config)) {
-      v3_movement_allowed = true;
+    if (!i2cstepper_v3_migrate_v2_config(&legacy, &v3_active_config) ||
+        !v3_config_valid(v3_active_config)) {
+      v3_default_config(&v3_active_config);
     }
+    if (v3_eeprom_write(v3_active_config)) v3_movement_allowed = true;
+  } else if (bootAction == I2CSTEPPER_V3_BOOT_MIGRATE_V1) {
+    v3_default_config(&v3_active_config);
+    v3_active_config.address = legacyType;
+    v3_active_config.mode = legacyType == I2CSTEPPER_V2_ROLE_MIXER ? I2CSTEPPER_V3_MODE_MIXER
+                                                                   : I2CSTEPPER_V3_MODE_PUMP;
+    const uint32_t defaultStepsPerMl = v3_active_config.stepsPerMl;
+    uint32_t legacyStepsPerMl = 0;
+    EEPROM.get(1, legacyStepsPerMl);
+    v3_active_config.stepsPerMl = legacyStepsPerMl;
+    if (!v3_config_valid(v3_active_config)) v3_active_config.stepsPerMl = defaultStepsPerMl;
+    if (v3_eeprom_write(v3_active_config)) v3_movement_allowed = true;
   } else if (bootAction == I2CSTEPPER_V3_BOOT_DEFAULTS) {
     v3_default_config(&v3_active_config);
     if (v3_eeprom_write(v3_active_config)) v3_movement_allowed = true;

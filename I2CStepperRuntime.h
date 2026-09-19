@@ -13,7 +13,7 @@ enum I2CStepperV3BootAction : uint8_t {
   I2CSTEPPER_V3_BOOT_USE_V3 = 0,
   I2CSTEPPER_V3_BOOT_MIGRATE_V2 = 1,
   I2CSTEPPER_V3_BOOT_DEFAULTS = 2,
-  I2CSTEPPER_V3_BOOT_ERROR = 3,
+  I2CSTEPPER_V3_BOOT_MIGRATE_V1 = 4,
 };
 
 enum I2CStepperV3HeartbeatTimeoutAction : uint8_t {
@@ -101,11 +101,15 @@ static inline void i2cstepper_v3_acknowledge_sequence(uint32_t sequence,
 }
 
 static inline I2CStepperV3BootAction i2cstepper_v3_boot_action(
-    I2CStepperV3EepromState state, bool hasV2Header, bool blank) {
+    I2CStepperV3EepromState state, bool hasV2Header, bool hasV1Type) {
   if (state == I2CSTEPPER_V3_EEPROM_VALID) return I2CSTEPPER_V3_BOOT_USE_V3;
-  if (state == I2CSTEPPER_V3_EEPROM_CORRUPT) return I2CSTEPPER_V3_BOOT_ERROR;
+  // Битая запись v3 и любые неизвестные данные заменяются настройками по умолчанию:
+  // иначе Nano не выходит на шину и Samovar её не видит.
+  if (state == I2CSTEPPER_V3_EEPROM_CORRUPT) return I2CSTEPPER_V3_BOOT_DEFAULTS;
   if (hasV2Header) return I2CSTEPPER_V3_BOOT_MIGRATE_V2;
-  return blank ? I2CSTEPPER_V3_BOOT_DEFAULTS : I2CSTEPPER_V3_BOOT_ERROR;
+  // Прошивки 0.1-0.4 хранили с нулевого байта {Type (1 мешалка / 2 насос), шагов на мл}.
+  if (hasV1Type) return I2CSTEPPER_V3_BOOT_MIGRATE_V1;
+  return I2CSTEPPER_V3_BOOT_DEFAULTS;
 }
 
 static inline uint16_t i2cstepper_v3_crc16(const uint8_t* data, uint8_t size) {

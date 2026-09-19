@@ -32,12 +32,14 @@ int main() {
          I2CSTEPPER_V3_EEPROM_ABSENT);
   assert(i2cstepper_v3_boot_action(I2CSTEPPER_V3_EEPROM_VALID, false, false) ==
          I2CSTEPPER_V3_BOOT_USE_V3);
-  assert(i2cstepper_v3_boot_action(I2CSTEPPER_V3_EEPROM_ABSENT, true, false) ==
+  assert(i2cstepper_v3_boot_action(I2CSTEPPER_V3_EEPROM_ABSENT, true, true) ==
          I2CSTEPPER_V3_BOOT_MIGRATE_V2);
-  assert(i2cstepper_v3_boot_action(I2CSTEPPER_V3_EEPROM_ABSENT, false, true) ==
-         I2CSTEPPER_V3_BOOT_DEFAULTS);
   assert(i2cstepper_v3_boot_action(I2CSTEPPER_V3_EEPROM_CORRUPT, true, true) ==
-         I2CSTEPPER_V3_BOOT_ERROR);
+         I2CSTEPPER_V3_BOOT_DEFAULTS);
+  assert(i2cstepper_v3_boot_action(I2CSTEPPER_V3_EEPROM_ABSENT, false, true) ==
+         I2CSTEPPER_V3_BOOT_MIGRATE_V1);
+  assert(i2cstepper_v3_boot_action(I2CSTEPPER_V3_EEPROM_ABSENT, false, false) ==
+         I2CSTEPPER_V3_BOOT_DEFAULTS);
   assert(!i2cstepper_v3_derived_config_valid(100U, 0U, true,
                                              18000U, 2147483647UL));
   assert(i2cstepper_v3_derived_config_valid(100U, 0U, false,
