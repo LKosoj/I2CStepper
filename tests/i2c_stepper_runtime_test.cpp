@@ -61,6 +61,10 @@ int main() {
   uint32_t lastHeartbeatMs = 0;
   i2cstepper_v3_claim_remote_ownership(&remoteOwner, &lastHeartbeatMs, 250U);
   assert(remoteOwner && lastHeartbeatMs == 250U);
+  assert(i2cstepper_v3_local_controls_locked(true, 10250U, 250U, true));
+  assert(!i2cstepper_v3_local_controls_locked(true, 300U, 250U, false));
+  assert(!i2cstepper_v3_local_controls_locked(true, 10251U, 250U, true));
+  assert(!i2cstepper_v3_local_controls_locked(false, 300U, 250U, true));
   assert(!i2cstepper_v3_heartbeat_expired(true, 10250U, 250U));
   assert(i2cstepper_v3_heartbeat_expired(true, 10251U, 250U));
   assert(!i2cstepper_v3_heartbeat_expired(false, 10251U, 250U));

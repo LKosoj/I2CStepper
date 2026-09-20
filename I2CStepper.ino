@@ -259,7 +259,8 @@ void v3_publish_frames() {
 }
 
 bool v3_local_controls_locked() {
-  return v3_remote_owner && (uint32_t)(millis() - v3_last_heartbeat_ms) <= I2CSTEPPER_V3_HEARTBEAT_TIMEOUT_MS;
+  return i2cstepper_v3_local_controls_locked(v3_remote_owner, millis(), v3_last_heartbeat_ms,
+                                             stepper_state || pause_phase || calibration_active);
 }
 
 void v3_local_stop() {

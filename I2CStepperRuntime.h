@@ -93,6 +93,15 @@ static inline void i2cstepper_v3_claim_remote_ownership(bool* remoteOwner,
 // останавливать процесс.
 #define I2CSTEPPER_V3_HEARTBEAT_TIMEOUT_MS 10000UL
 
+// Энкодер и кнопки Nano запираются, только пока Самовар на связи И привод занят (мотор,
+// пауза цикла, калибровка). В простое меню доступно: иначе при подключённом Самоваре
+// нельзя ни сменить адрес, ни покрутить мотор вручную.
+static inline bool i2cstepper_v3_local_controls_locked(bool remoteOwner, uint32_t nowMs,
+                                                        uint32_t lastHeartbeatMs, bool busy) {
+  return busy && remoteOwner &&
+         (uint32_t)(nowMs - lastHeartbeatMs) <= I2CSTEPPER_V3_HEARTBEAT_TIMEOUT_MS;
+}
+
 static inline bool i2cstepper_v3_heartbeat_expired(bool remoteOwner, uint32_t nowMs,
                                                     uint32_t lastHeartbeatMs) {
   return remoteOwner && (uint32_t)(nowMs - lastHeartbeatMs) > I2CSTEPPER_V3_HEARTBEAT_TIMEOUT_MS;
