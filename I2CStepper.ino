@@ -27,7 +27,6 @@ void read_config();
 bool write_config();
 uint32_t calc_target_from_time(uint32_t time_value, uint16_t spd);
 void start_current_mode();
-void start_calibration();
 void finish_calibration();
 bool external_sensor_active();
 void update_runtime_state();
@@ -913,6 +912,17 @@ bool external_sensor_active() {
   return active;
 }
 
+// Непрерывное вращение с плавным разгоном идёт в два этапа: сначала как ход к далёкой цели
+// (разгон считает библиотека), затем finish_continuous_ramp() переводит мотор на постоянную скорость.
+static void run_stepper(uint16_t spd, uint32_t target, bool continuous) {
+  if (continuous && !(I2CSTPSetup.optionFlags & I2CSTEPPER_FLAG_SMOOTH_START)) {
+    stepper.setSpeed((int32_t)spd);
+  } else {
+    stepper.setMaxSpeed(spd);
+    stepper.setTarget((int32_t)(continuous ? STEPPER_TARGET_LIMIT : target));
+  }
+}
+
 static void start_motion(uint16_t spd, uint32_t target, byte dir, bool continuous) {
   if (!v3_movement_allowed || spd == 0 || (!continuous && target == 0)) {
     v3_status_snapshot.error = I2CSTEPPER_V3_ERR_BAD_CONFIG;
@@ -926,21 +936,20 @@ static void start_motion(uint16_t spd, uint32_t target, byte dir, bool continuou
   v3_status_snapshot.stopReason = I2CSTEPPER_V3_STOP_NONE;
 
   pause_stepper_timer();
-  stepper.brake();
+  // Непрерывное вращение уже идёт в ту же сторону (Самовар меняет скорость повторным стартом):
+  // не тормозим, иначе каждая смена скорости начинала бы разгон с нуля.
+  if (!(continuous && v3_motion_continuous && dir == last_dir && stepper.getState())) {
+    stepper.brake();
+    stepper.setCurrent(0);
+  }
   stepper.enable();
   stepper.reverse(dir);
-  stepper.setCurrent(0);
   if (I2CSTPSetup.optionFlags & I2CSTEPPER_FLAG_SMOOTH_START) {
     stepper.setAcceleration(stepper_acceleration_from_speed(spd));
   } else {
     stepper.setAcceleration(0);
   }
-  if (continuous) {
-    stepper.setSpeed((int32_t)spd);
-  } else {
-    stepper.setMaxSpeed(spd);
-    stepper.setTarget((int32_t)target);
-  }
+  run_stepper(spd, target, continuous);
   curr_spd = 0;
   set_dir = dir;
   last_dir = dir;
@@ -961,12 +970,7 @@ void apply_local_motion_settings() {
 
   pause_stepper_timer();
   stepper.reverse(set_dir);
-  if (v3_motion_continuous) {
-    stepper.setSpeed((int32_t)spd);
-  } else {
-    stepper.setMaxSpeed(spd);
-    stepper.setTarget(stepper.getTarget());
-  }
+  run_stepper(spd, stepper.getTarget(), v3_motion_continuous);
   curr_spd = 0;
   set_motion_speed(spd);
   timer1_schedule(stepper.getPeriod());
@@ -1029,18 +1033,6 @@ void start_current_mode() {
   }
 }
 
-void start_calibration() {
-  if (!v3_movement_allowed) return;
-  if (I2CSTPSetup.role != I2CPUMP) {
-    v3_status_snapshot.error = I2CSTEPPER_V3_ERR_UNSUPPORTED_MODE;
-    return;
-  }
-  uint16_t speed = stepper_speed_steps_pump(I2CSTPSetup.pumpMlHour ? I2CSTPSetup.pumpMlHour : 100, I2CSTPSetup.stepperStepMl);
-  I2CSTPSetup.mode = I2CPUMP;
-  start_motion(speed, 0, 0, true);
-  calibration_active = true;
-}
-
 void finish_calibration() {
   uint8_t saved_prescale = pause_stepper_timer();
   uint32_t done = stepper.getCurrent();
@@ -1054,6 +1046,17 @@ void finish_calibration() {
     v3_staging_config.stepsPerMl = I2CSTPSetup.stepperStepMl;
   }
   v3_publish_frames();
+}
+
+// Второй этап плавного старта непрерывного вращения: разгон закончен (период шага дошёл
+// до заданного) - переводим мотор с хода к далёкой цели на постоянную скорость.
+static void finish_continuous_ramp() {
+  if (!v3_motion_continuous || stepper.getStatus() != 1) return;
+  uint8_t saved_prescale = pause_stepper_timer();
+  if (stepper.getPeriod() <= 1000000UL / get_motion_speed()) {
+    stepper.setSpeed((int32_t)get_motion_speed());
+  }
+  resume_stepper_timer(saved_prescale);
 }
 
 void update_runtime_state() {
@@ -1086,6 +1089,8 @@ void update_runtime_state() {
     pause_phase = false;
     start_current_mode();
   }
+
+  finish_continuous_ramp();
 
   if (!pause_phase && !stepper.getState() && stepper_state) {
     if (I2CSTPSetup.mode == I2CMIXER &&

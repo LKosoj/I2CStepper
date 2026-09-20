@@ -571,6 +571,7 @@ void stop_motion(bool) { stop_calls++; stepper_state = false; stepper.running = 
 void pause_stepper_timer() {}
 void timer1_disarm() {}
 void start_current_mode() {}
+void finish_continuous_ramp() {}
 
 @RUNTIME@
 
@@ -741,6 +742,7 @@ uint8_t started_direction = 0;
 uint8_t start_calls = 0;
 uint32_t millis() { return fake_now; }
 bool external_sensor_active() { return false; }
+void finish_continuous_ramp() {}
 void pause_stepper_timer() {}
 void timer1_disarm() {}
 void stop_motion(bool) {}
@@ -945,6 +947,10 @@ int main() {
 
     motion_body = function_body("static void start_motion(uint16_t spd, uint32_t target, byte dir, bool continuous)")
     motion_definition = "static void start_motion(uint16_t spd, uint32_t target, byte dir, bool continuous) {" + motion_body + "}"
+    run_body = function_body("static void run_stepper(uint16_t spd, uint32_t target, bool continuous)")
+    motion_definition = "static void run_stepper(uint16_t spd, uint32_t target, bool continuous) {" + run_body + "}\n" + motion_definition
+    ramp_body = function_body("static void finish_continuous_ramp()")
+    ramp_definition = "static void finish_continuous_ramp() {" + ramp_body + "}"
     motion_harness = r'''
 #include <assert.h>
 #include <stdint.h>
@@ -960,15 +966,20 @@ struct FakeStepper {
   uint16_t maxSpeed = 0;
   int32_t speed = 0;
   int32_t target = 0;
-  void brake() {}
+  uint8_t status = 0;
+  uint32_t period = 1000U;
+  uint8_t brakes = 0;
+  void brake() { brakes++; }
   void enable() {}
   void reverse(byte value) { reverseValue = value; }
   void setCurrent(int32_t) {}
+  bool getState() const { return status != 0; }
+  uint8_t getStatus() const { return status; }
   void setAcceleration(uint16_t value) { acceleration = value; }
   void setSpeed(int32_t value) { speed = value; }
   void setMaxSpeed(uint16_t value) { maxSpeed = value; }
   void setTarget(int32_t value) { target = value; }
-  uint32_t getPeriod() const { return 1000U; }
+  uint32_t getPeriod() const { return period; }
 } stepper;
 struct { uint8_t optionFlags; } I2CSTPSetup = {};
 bool v3_movement_allowed = true;
@@ -985,13 +996,17 @@ byte last_dir = 0;
 uint16_t stored_speed = 0;
 uint32_t stored_target = 0;
 uint32_t scheduled_period = 0;
-void pause_stepper_timer() {}
+uint8_t pause_stepper_timer() { return 0; }
+void resume_stepper_timer(uint8_t) {}
+uint16_t get_motion_speed() { return stored_speed; }
 uint16_t stepper_acceleration_from_speed(uint16_t speed) { return speed / 10U ? speed / 10U : 1U; }
 void set_motion_speed(uint16_t speed) { stored_speed = speed; }
 void set_motion_target(uint32_t target) { stored_target = target; }
 void timer1_schedule(uint32_t period) { scheduled_period = period; }
 
 @START_MOTION@
+
+@RAMP@
 
 int main() {
   start_motion(1000U, 123456U, 1U, false);
@@ -1015,6 +1030,33 @@ int main() {
   start_motion(18000U, 0U, 0U, true);
   assert(stepper.target == 0 && stepper.speed == 18000 && v3_motion_continuous);
 
+  // Плавный старт непрерывного вращения: этап 1 - ход к далёкой цели, этап 2 - постоянная скорость.
+  stepper = {};
+  I2CSTPSetup.optionFlags = I2CSTEPPER_FLAG_SMOOTH_START;
+  start_motion(2000U, 0U, 0U, true);
+  assert(stepper.speed == 0 && stepper.maxSpeed == 2000U && stepper.target == 2147483647L);
+  assert(stepper.acceleration == 200U && stepper.brakes == 1U);
+  assert(v3_motion_continuous && stored_target == 0U && v3_staging_motion.targetSteps == 0U);
+  stepper.status = 1U;
+  stepper.period = 501U;
+  finish_continuous_ramp();
+  assert(stepper.speed == 0);
+  stepper.period = 500U;
+  finish_continuous_ramp();
+  assert(stepper.speed == 2000);
+  // Смена скорости на ходу в ту же сторону не тормозит мотор, в другую - перезапускает.
+  start_motion(3000U, 0U, 0U, true);
+  assert(stepper.brakes == 1U && stepper.maxSpeed == 3000U);
+  start_motion(3000U, 0U, 1U, true);
+  assert(stepper.brakes == 2U);
+  // Конечный ход переключать на постоянную скорость нельзя.
+  stepper = {};
+  start_motion(1000U, 5000U, 0U, false);
+  stepper.status = 1U;
+  finish_continuous_ramp();
+  assert(stepper.speed == 0 && stepper.target == 5000);
+  I2CSTPSetup.optionFlags = 0;
+
   v3_status_snapshot.error = I2CSTEPPER_V3_ERR_NONE;
   start_motion(0U, 1U, 0U, false);
   assert(v3_status_snapshot.error == I2CSTEPPER_V3_ERR_BAD_CONFIG);
@@ -1023,9 +1065,9 @@ int main() {
   assert(v3_status_snapshot.error == I2CSTEPPER_V3_ERR_BAD_CONFIG);
   return 0;
 }
-'''.replace("@START_MOTION@", motion_definition)
+'''.replace("@START_MOTION@", motion_definition).replace("@RAMP@", ramp_definition)
     assert compile_and_run(motion_harness, protocol, "motion").returncode == 0
-    motion_mutation = motion_definition.replace("if (continuous) {", "if (false) {", 1)
+    motion_mutation = motion_definition.replace("if (continuous && ", "if (false && ", 1)
     assert motion_mutation != motion_definition, "continuous motion mutation anchor is missing"
     require_mutation_fails(
         motion_harness.replace(motion_definition, motion_mutation), protocol, "motion_mutated")
@@ -1199,7 +1241,6 @@ def main():
         "void start_stepper(bool from_int)",
         "static void start_motion(uint16_t spd, uint32_t target, byte dir, bool continuous)",
         "void start_current_mode()",
-        "void start_calibration()",
     ):
         require(function_body(signature), "v3_movement_allowed")
 

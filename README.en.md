@@ -86,7 +86,8 @@ Details:
 - **Time (`Mixer`).** From 0 to 100000 s. `0` means “run until stopped manually”; the screen keeps showing `STP Time:0`.
 - **Volume (`Fill`).** From 1 to 100000 ml. After the set volume has been dispensed the motor stops on its own.
 - **Start.** The motor will not start if the speed gives 0 steps per second, if in `Fill` or in `Mixer` with a time the path comes out as zero, or if there was an EEPROM error at startup (motion is locked). The line then stays `Off`.
-- **Stop.** If soft start is enabled (the option is set from Samovar, enabled by default), the motor decelerates smoothly; continuous motion stops immediately. A stop from the encoder is reported to Samovar as a “local STOP”.
+- **Smooth acceleration and deceleration.** Enabled with the “Плавный разгон и торможение” (smooth acceleration and deceleration) checkbox in Samovar: “Settings” → `I2CStepper` tab → “Save to Nano” (enabled by default; the Nano menu has no such option). When running to a set path (`Fill` and `Mixer` with a non-zero time) the motor accelerates for about 10 seconds and decelerates the same way. In continuous motion (`Pump`, `Mixer` with time 0) the motor accelerates just as smoothly but stops immediately: the STOP command must not lag. A speed change on the fly is also smooth upwards and instant downwards, and the motor does not stop for it. Without the checkbox every start and every stop happens immediately.
+- **Stop.** A stop from the encoder is reported to Samovar as a “local STOP”.
 - The pause between mixer cycles, the direction change after the pause and the reaction to an external sensor **cannot be configured** from the local menu - only from Samovar. If they are set, they also apply to a local start.
 
 ### Setup screen (`SETUP`)
@@ -145,6 +146,7 @@ pio run
 - Local host test of the v3 protocol: `g++ -std=c++11 -Wall -Wextra -pedantic -I. -I../Samovar/libraries/I2CStepperProtocol/src tests/i2c_protocol_v3_test.cpp -o /tmp/i2c_protocol_v3_test && /tmp/i2c_protocol_v3_test`
 - Local host test of EEPROM/mailbox v3: `g++ -std=c++11 -Wall -Wextra -pedantic -I. tests/i2c_stepper_runtime_test.cpp -o /tmp/i2c_stepper_runtime_test && /tmp/i2c_stepper_runtime_test`
 - Source-level host test of the v3 runtime/Timer1: `python3 tests/i2c_stepper_v3_runtime_test.py`
+- Smooth acceleration flag check against the real `GyverStepper2` library (needs the sibling `../Samovar` directory): `python3 tests/smooth_start_sim_test.py`
 - Hardware checklist: [`docs/hardware-test-checklist.md`](docs/hardware-test-checklist.md) (in Russian)
 
 Peripheral wiring:
