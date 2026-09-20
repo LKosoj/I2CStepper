@@ -515,13 +515,31 @@ void menu_init(void) {
 void poll_menu(void) {
   bool updscreen = true;
 
+  //Самовар управляет приводом: меню заблокировано, показываем ход работы и даём локальный STOP
+  static bool remote_screen = false;
   if (v3_local_controls_locked()) {
-    if (encoder.isClick() && main_menu.get_currentScreen() == &stp_screen &&
-        main_menu.get_focusedLine() == 3 && get_stepper_state()) {
+    if (encoder.isClick()) {
       v3_local_stop();
-      main_menu.update();
+      return;
+    }
+    uint32_t currS = millis() / 1000;
+    if (!remote_screen || currS != oldS) {
+      if (!remote_screen) {
+        lcd.clear();
+        lcd.setCursor(0, 1);
+        lcd.print(F("Click = STOP"));
+        remote_screen = true;
+      }
+      oldS = currS;
+      lcd.setCursor(0, 0);
+      byte len = lcd.print(format_motion_line(false));
+      for (; len < LCD_COLUMNS; len++) lcd.write(' ');
     }
     return;
+  }
+  if (remote_screen) {
+    remote_screen = false;
+    main_menu.update();
   }
 
   if (encoder.isRight()) {
