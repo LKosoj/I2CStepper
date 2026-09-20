@@ -91,6 +91,7 @@ const char str_STP_Start[] PROGMEM = "STP Start:";
 const char str_SET_Type[] PROGMEM = "Type:";
 const char str_SET_Stp_Ml[] PROGMEM = "STP/ML:";
 const char str_SET_Address[] PROGMEM = "I2C Adr:";
+const char str_SET_Smooth[] PROGMEM = "Smooth:";
 //общий буфер текста меню: LiquidMenu печатает результат геттера сразу после вызова
 static char menu_text[17];
 
@@ -141,7 +142,9 @@ LiquidLine setup_line1(0, 0, str_SET_Type, get_stp_type);
 LiquidLine setup_line2(0, 1, str_SET_Stp_Ml, get_stp_ml);
 uint8_t get_i2c_address() { return v3_staging_config.address; }
 LiquidLine setup_line3(0, 2, str_SET_Address, get_i2c_address);
-LiquidScreen setup_screen(setup_line1, setup_line2, setup_line3, back_line);
+const char* get_smooth_start();
+LiquidLine setup_line4(0, 3, str_SET_Smooth, get_smooth_start);
+LiquidScreen setup_screen(setup_line1, setup_line2, setup_line3, setup_line4);
 
 //«грязный» флаг — пишем конфиг и перезагружаемся только если в setup что-то реально поменялось
 bool setup_dirty = false;
@@ -200,6 +203,11 @@ const char* get_mixer_pump_state() {
   else return get_c_ptr(c_Off);
 }
 
+const char* get_smooth_start() {
+  if (I2CSTPSetup.optionFlags & I2CSTEPPER_FLAG_SMOOTH_START) return get_c_ptr(c_On);
+  else return get_c_ptr(c_Off);
+}
+
 const char* get_stepper_state_c() {
   if (stepper_state) return get_c_ptr(c_On);
   else return get_c_ptr(c_Off);
@@ -219,6 +227,13 @@ void change_type() {
   if (mode == I2CSTPSetup.mode) return;
   I2CSTPSetup.mode = mode;
   I2CSTPSetup.role = (mode == I2CMIXER) ? I2CMIXER : I2CPUMP;
+  setup_dirty = true;
+}
+
+//плавный разгон и торможение: то же значение, что галочка в настройках Самовара
+void change_smooth_start() {
+  if (v3_local_controls_locked()) return;
+  I2CSTPSetup.optionFlags ^= I2CSTEPPER_FLAG_SMOOTH_START;
   setup_dirty = true;
 }
 
@@ -480,6 +495,9 @@ void menu_init(void) {
   setup_line2.attach_function(decrease, spd_ml_DecFunction);
   setup_line3.attach_function(increase, address_inc);
   setup_line3.attach_function(decrease, address_dec);
+  setup_line4.attach_function(increase, change_smooth_start);
+  setup_line4.attach_function(decrease, change_smooth_start);
+  setup_screen.add_line(back_line);
 
   main_screen.set_displayLineCount(2);
   stp_screen.set_displayLineCount(2);
@@ -497,6 +515,7 @@ void menu_init(void) {
   setup_line1.set_asProgmem(1);
   setup_line2.set_asProgmem(1);
   setup_line3.set_asProgmem(1);
+  setup_line4.set_asProgmem(1);
 
   
   main_menu.add_screen(main_screen);
@@ -625,7 +644,7 @@ void poll_menu(void) {
         else set_menu_editing(false);
       }
     } else if (main_menu.get_currentScreen() == &setup_screen) {
-      if (main_menu.get_focusedLine() == 3) {
+      if (main_menu.get_focusedLine() == 4) {
         updscreen = false;
         backFunction();
       } else if (navigate) {

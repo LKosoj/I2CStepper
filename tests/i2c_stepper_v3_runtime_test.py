@@ -465,6 +465,7 @@ int main() {
 
     relay_body = function_body("static bool v3_apply_staged_relay()")
     relay_definition = "static bool v3_apply_staged_relay() {" + relay_body + "}"
+    relay_definition = "static void write_relay_pins() {" + function_body("static void write_relay_pins()") + "}\n" + relay_definition
     claim_body = function_body("static void v3_claim_remote_ownership()")
     claim_definition = "static void v3_claim_remote_ownership() {" + claim_body + "}"
     relay_harness = r'''

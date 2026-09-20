@@ -65,6 +65,8 @@ static uint8_t v3_capabilities() {
 static void v3_default_config(I2CStepperV3Config* config) {
   config->address = 1;
   config->mode = I2CSTEPPER_V3_MODE_MIXER;
+  // Только для пустой или испорченной EEPROM. На уже настроенной плате плавный разгон берётся из
+  // сохранённых настроек и меняется строкой Smooth в SETUP или галочкой в Самоваре.
   config->optionFlags = I2CSTEPPER_FLAG_SMOOTH_START;
   config->sensorFlags = I2CSTEPPER_SENSOR_STOP;
   config->relayMask = 0;
@@ -200,6 +202,12 @@ static bool v3_config_valid(const I2CStepperV3Config& config) {
                                              I2CSTEPPER_V3_TARGET_STEPS_MAX);
 }
 
+// Выставляет выводы реле по rele_state. Нужен везде, где меняется маска реле: иначе экран
+// показывает On, а само реле остаётся выключенным.
+static void write_relay_pins() {
+  for (byte i = 0; i < 4; i++) digitalWrite(rele_pin[i], bit_is_set(rele_state, i));
+}
+
 static void v3_apply_to_runtime() {
   I2CSTPSetup.role = i2cstepper_v3_address_is_mixer(v3_active_config.address) ? I2CMIXER : I2CPUMP;
   I2CSTPSetup.mode = v3_active_config.mode;
@@ -215,6 +223,7 @@ static void v3_apply_to_runtime() {
   I2CSTPSetup.fillingMlHour = v3_active_config.fillingMlHour;
   I2CSTPSetup.stepperStepMl = v3_active_config.stepsPerMl;
   rele_state = v3_active_config.relayMask;
+  write_relay_pins();
   set_spd = I2CSTPSetup.mode == I2CMIXER ? I2CSTPSetup.mixerRpm :
             (I2CSTPSetup.mode == I2CPUMP ? I2CSTPSetup.pumpMlHour : I2CSTPSetup.fillingMlHour);
   set_time = I2CSTPSetup.mode == I2CMIXER ? I2CSTPSetup.mixerRunSec :
@@ -339,7 +348,7 @@ static bool v3_apply_staged_relay() {
   v3_staging_config.relayMask = v3_active_config.relayMask;
   I2CSTPSetup.relayMask = v3_active_config.relayMask;
   rele_state = v3_active_config.relayMask;
-  for (byte i = 0; i < 4; i++) digitalWrite(rele_pin[i], bit_is_set(rele_state, i));
+  write_relay_pins();
   v3_status_snapshot.generation++;
   v3_claim_remote_ownership();
   return true;
@@ -583,7 +592,9 @@ void setup() {
   stepper.brake();                                    // тормозим шаговик
   stepper.disable();                                  // отключаем шаговик
 
-  Serial.begin(115200);
+#ifdef __I2CStepper_DEBUG
+  Serial.begin(115200);                               // порт нужен только отладке: в рабочей прошивке он не помещается во флеш
+#endif
   attachPCINT(digitalPinToPCINT(ENC_CLK), isrENK, CHANGE); //вешаем прерывания для обработки энкодера
   attachPCINT(digitalPinToPCINT(ENC_DT), isrENK, CHANGE);  //вешаем прерывания для обработки энкодера
   attachPCINT(digitalPinToPCINT(ENC_SW), isrENK, CHANGE);  //вешаем прерывания для обработки энкодера
@@ -598,9 +609,7 @@ void setup() {
   pinMode(RELE_PIN4, OUTPUT);                         // используем ногу для вывода
   pinMode(EXT_SENSOR_PIN, EXT_SENSOR_INPUT_MODE);
   rele_state = I2CSTPSetup.relayMask & 0x0F;
-  for (byte i = 0; i < 4; i++) {
-    digitalWrite(rele_pin[i], bit_is_set(rele_state, i));
-  }
+  write_relay_pins();
   v3_publish_frames();
 
   menu_init();                                        // инициализуерм меню экрана
@@ -610,12 +619,6 @@ void setup() {
   TCNT1 = 0;
   timer1_disarm();
 
-  if (I2CSTPSetup.role == I2CMIXER) {
-    Serial.print(F("Mixer "));
-  } else if (I2CSTPSetup.role == I2CPUMP) {
-    Serial.print(F("Pump "));
-  }
-  Serial.println(F("ready"));
 #ifdef __I2CStepper_DEBUG
   set_spd = 490;
   set_time = 2000;
@@ -1163,7 +1166,6 @@ void read_config() {
   }
   if (!v3_movement_allowed) {
     v3_status_snapshot.error = I2CSTEPPER_V3_ERR_EEPROM_INVALID;
-    Serial.println(F("EEPROM v3 error"));
     return;
   }
   v3_staging_config = v3_active_config;

@@ -79,7 +79,6 @@ enum I2CType {I2CMIXER = 1, I2CPUMP = 2, I2CFILLING = 3};
 
 
 //#define GS_FAST_PROFILE 10
-//#define SMOOTH_ALGORITHM
 #include <GyverStepper2.h>
 GStepper2< STEPPER2WIRE> stepper(STEPPER_STEPS, STEPPER_STEP, STEPPER_DIR, STEPPER_EN); // объект для работы с шаговым двигателем
 

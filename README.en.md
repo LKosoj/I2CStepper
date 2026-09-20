@@ -86,7 +86,7 @@ Details:
 - **Time (`Mixer`).** From 0 to 100000 s. `0` means “run until stopped manually”; the screen keeps showing `STP Time:0`.
 - **Volume (`Fill`).** From 1 to 100000 ml. After the set volume has been dispensed the motor stops on its own.
 - **Start.** The motor will not start if the speed gives 0 steps per second, if in `Fill` or in `Mixer` with a time the path comes out as zero, or if there was an EEPROM error at startup (motion is locked). The line then stays `Off`.
-- **Smooth acceleration and deceleration.** Enabled with the “Плавный разгон и торможение” (smooth acceleration and deceleration) checkbox in Samovar: “Settings” → `I2CStepper` tab → “Save to Nano” (enabled by default; the Nano menu has no such option). When running to a set path (`Fill` and `Mixer` with a non-zero time) the motor accelerates for about 10 seconds and decelerates the same way. In continuous motion (`Pump`, `Mixer` with time 0) the motor accelerates just as smoothly but stops immediately: the STOP command must not lag. A speed change on the fly is also smooth upwards and instant downwards, and the motor does not stop for it. Without the checkbox every start and every stop happens immediately.
+- **Smooth acceleration and deceleration.** Enabled in two ways, both change the same setting: the `Smooth` line on the `SETUP` screen of the Nano itself, or the “Плавный разгон и торможение” (smooth acceleration and deceleration) checkbox in Samovar (“Settings” → `I2CStepper` tab → “Save to Nano”). Enabled by default. The setting is stored in the Nano EEPROM: the value in the source (`v3_default_config`) applies only to a board with an empty EEPROM, so recompiling with another value changes nothing on an already configured board. When running to a set path (`Fill` and `Mixer` with a non-zero time) the motor accelerates for about 10 seconds and decelerates the same way. In continuous motion (`Pump`, `Mixer` with time 0) the motor accelerates just as smoothly but stops immediately: the STOP command must not lag. A speed change on the fly is also smooth upwards and instant downwards, and the motor does not stop for it. With the setting off every start and every stop happens immediately.
 - **Stop.** A stop from the encoder is reported to Samovar as a “local STOP”.
 - The pause between mixer cycles, the direction change after the pause and the reaction to an external sensor **cannot be configured** from the local menu - only from Samovar. If they are set, they also apply to a local start.
 
@@ -97,13 +97,14 @@ Details:
 | `Type:Mixer/Pump/Fill` | Stepper motor mode | Rotating in either direction switches `Pump` ↔ `Fill`. On an odd address the mode is always `Mixer` and cannot be changed |
 | `STP/ML:16000` | How many motor steps correspond to 1 ml - the pump calibration | Step 1, with the button held - 10 and more. Minimum 100. Not used for `Mixer` |
 | `I2C Adr:1` | The device address on the I2C bus for Samovar, from 1 to 10 | Rotation changes the address by 1 |
+| `Smooth:On/Off` | Smooth acceleration and deceleration of the motor | Rotation in either direction toggles `On` ↔ `Off` |
 | `<BACK` | - | Returns to the main screen |
 
 The address defines the device role: **odd addresses (1, 3, 5, 7, 9) are a mixer** (`Mixer`), **even ones (2, 4, 6, 8, 10) are a pump** (`Pump` or `Fill`). So to turn a pump into a mixer you change the address, not the type: on switching to an odd address the type becomes `Mixer` by itself, on switching to an even one - `Pump`. The other settings are preserved.
 
 Saving:
 
-- A press in edit mode saves the settings to EEPROM. The type and `STP/ML` take effect immediately.
+- A press in edit mode saves the settings to EEPROM. The type, `STP/ML` and `Smooth` take effect immediately (`Smooth` - from the next motor start).
 - If the address was changed, `Saved. Reboot!` appears on the screen and the device reboots - the new address takes effect only after a reboot.
 - If you leave through `<BACK` without saving the changes with a press, they are saved automatically, after which the device also reboots with the `Saved. Reboot!` message. If nothing was changed, `<BACK` simply returns to the main screen.
 
@@ -138,6 +139,8 @@ Build:
 pio run
 ```
 
+The serial port (`Serial`) is not used by the production firmware - it does not fit into the Nano flash. Messages appear in the serial monitor only in a debug build with `#define __I2CStepper_DEBUG` in `I2CStepper.h`.
+
 ## Checks
 
 - CI: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
@@ -147,6 +150,7 @@ pio run
 - Local host test of EEPROM/mailbox v3: `g++ -std=c++11 -Wall -Wextra -pedantic -I. tests/i2c_stepper_runtime_test.cpp -o /tmp/i2c_stepper_runtime_test && /tmp/i2c_stepper_runtime_test`
 - Source-level host test of the v3 runtime/Timer1: `python3 tests/i2c_stepper_v3_runtime_test.py`
 - Smooth acceleration flag check against the real `GyverStepper2` library (needs the sibling `../Samovar` directory): `python3 tests/smooth_start_sim_test.py`
+- End-to-end check of settings coming from Samovar (the smooth acceleration flag and the relays reach the motor and the pins; needs the sibling `../Samovar` directory): `python3 tests/remote_config_e2e_test.py`
 - Hardware checklist: [`docs/hardware-test-checklist.md`](docs/hardware-test-checklist.md) (in Russian)
 
 Peripheral wiring:
