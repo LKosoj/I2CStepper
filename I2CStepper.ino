@@ -390,10 +390,12 @@ void v3_process_receive() {
   if (v3_take_mailbox(v3_rx_config_a, I2CSTEPPER_V3_CONFIG_A_SIZE,
                       &v3_rx_config_a_pending, packet)) {
     i2cstepper_v3_decode_config_a(packet, &v3_staging_config);
+    v3_config_a_fresh = true;
   }
   if (v3_take_mailbox(v3_rx_config_b, I2CSTEPPER_V3_CONFIG_B_SIZE,
                       &v3_rx_config_b_pending, packet)) {
     i2cstepper_v3_decode_config_b(packet, &v3_staging_config);
+    v3_config_b_fresh = true;
   }
   if (v3_take_mailbox(v3_rx_motion, I2CSTEPPER_V3_MOTION_SIZE,
                       &v3_rx_motion_pending, packet)) {
@@ -401,6 +403,9 @@ void v3_process_receive() {
   }
   if (v3_take_mailbox(v3_rx_command, I2CSTEPPER_V3_COMMAND_SIZE,
                       &v3_rx_command_pending, packet)) {
+    const bool completeConfig = v3_config_a_fresh && v3_config_b_fresh;
+    v3_config_a_fresh = false;
+    v3_config_b_fresh = false;
     I2CStepperV3CommandFrame command;
     i2cstepper_v3_decode_command(packet, &command);
     I2CStepperV3SequenceState seq = i2cstepper_v3_sequence_state(v3_last_sequence, command.commandSeq);
@@ -420,7 +425,9 @@ void v3_process_receive() {
         v3_set_result(command.commandSeq, I2CSTEPPER_V3_RESULT_SUCCESS, I2CSTEPPER_V3_ERR_NONE);
       } else if (command.command == I2CSTEPPER_V3_CMD_APPLY || command.command == I2CSTEPPER_V3_CMD_SAVE) {
         I2CStepperV3Config prepared;
-        if (!i2cstepper_v3_address_valid(v3_staging_config.address)) {
+        if (!completeConfig) {
+          v3_set_result(command.commandSeq, I2CSTEPPER_V3_RESULT_FAILED, I2CSTEPPER_V3_ERR_BAD_CONFIG);
+        } else if (!i2cstepper_v3_address_valid(v3_staging_config.address)) {
           v3_set_result(command.commandSeq, I2CSTEPPER_V3_RESULT_FAILED, I2CSTEPPER_V3_ERR_BAD_ADDRESS);
         } else if (command.command == I2CSTEPPER_V3_CMD_APPLY &&
                    v3_apply_address_error() != I2CSTEPPER_V3_ERR_NONE) {

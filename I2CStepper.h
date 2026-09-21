@@ -113,6 +113,8 @@ uint8_t               v3_rx_motion[I2CSTEPPER_V3_MOTION_SIZE];
 uint8_t               v3_rx_command[I2CSTEPPER_V3_COMMAND_SIZE];
 volatile bool         v3_rx_config_a_pending;
 volatile bool         v3_rx_config_b_pending;
+bool                  v3_config_a_fresh;
+bool                  v3_config_b_fresh;
 volatile bool         v3_rx_motion_pending;
 volatile bool         v3_rx_command_pending;
 uint8_t               v3_read_register;

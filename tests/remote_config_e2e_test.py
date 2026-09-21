@@ -39,6 +39,7 @@ struct FakeStepper { bool getState() { return false; } int32_t getCurrent() { re
 uint8_t v3_rx_config_a[I2CSTEPPER_V3_CONFIG_A_SIZE], v3_rx_config_b[I2CSTEPPER_V3_CONFIG_B_SIZE];
 uint8_t v3_rx_motion[I2CSTEPPER_V3_MOTION_SIZE], v3_rx_command[I2CSTEPPER_V3_COMMAND_SIZE];
 volatile bool v3_rx_config_a_pending, v3_rx_config_b_pending, v3_rx_motion_pending, v3_rx_command_pending;
+bool v3_config_a_fresh = false, v3_config_b_fresh = false;
 uint8_t v3_read_register = 0;
 I2CStepperV3Config v3_active_config = {}, v3_staging_config = {};
 I2CStepperV3Motion v3_staging_motion = {};
@@ -111,7 +112,23 @@ int main() {
   v3_apply_to_runtime();
   assert(I2CSTPSetup.optionFlags & I2CSTEPPER_FLAG_SMOOTH_START);
 
+  // Один новый блок нельзя смешивать со старой половиной конфигурации.
+  config.mixerRpm = 100;
+  uint8_t b[I2CSTEPPER_V3_CONFIG_B_SIZE] = {};
+  uint8_t c[I2CSTEPPER_V3_COMMAND_SIZE] = {};
+  i2cstepper_v3_encode_config_b(b, &config);
+  I2CStepperV3CommandFrame incomplete = {1, I2CSTEPPER_V3_CMD_SAVE,
+      i2cstepper_v3_sequence_next(v3_last_sequence)};
+  i2cstepper_v3_encode_command(c, &incomplete);
+  deliver(I2CSTEPPER_V3_REG_CONFIG_B, b, sizeof(b));
+  deliver(I2CSTEPPER_V3_REG_COMMAND, c, sizeof(c));
+  v3_process_receive();
+  assert(v3_status_snapshot.commandResult == I2CSTEPPER_V3_RESULT_FAILED);
+  assert(v3_status_snapshot.error == I2CSTEPPER_V3_ERR_BAD_CONFIG);
+  assert(v3_active_config.mixerRpm == 20);
+
   // Галочку сняли: и «Применить», и «Сохранить» должны убрать флаг из рабочих настроек мотора.
+  config.mixerRpm = 20;
   config.optionFlags = 0;
   samovar_sends(config, I2CSTEPPER_V3_CMD_SAVE);
   assert(!(I2CSTPSetup.optionFlags & I2CSTEPPER_FLAG_SMOOTH_START));
@@ -158,8 +175,19 @@ def main():
             "void v3_wire_receive(int count)",
             "void v3_process_receive()",
         ))
-    result = compile_and_run(HARNESS.replace("@FIRMWARE@", firmware), PROTOCOL, "remote_config_e2e")
+    source = HARNESS.replace("@FIRMWARE@", firmware)
+    result = compile_and_run(source, PROTOCOL, "remote_config_e2e")
     assert result.returncode == 0, result.stdout + result.stderr
+    for old, new, name in (
+        ("const bool completeConfig = v3_config_a_fresh && v3_config_b_fresh;",
+         "const bool completeConfig = true;", "missing config completeness check"),
+        ("v3_config_a_fresh = true;", "v3_config_a_fresh = false;", "CONFIG_A freshness"),
+        ("v3_config_b_fresh = true;", "v3_config_b_fresh = false;", "CONFIG_B freshness"),
+    ):
+        mutant = source.replace(old, new, 1)
+        assert mutant != source, name + " mutation anchor missing"
+        mutated = compile_and_run(mutant, PROTOCOL, "remote_config_e2e_mutated")
+        assert mutated.returncode != 0, name + " mutation survived"
 
 
 if __name__ == "__main__":
