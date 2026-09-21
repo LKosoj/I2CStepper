@@ -534,6 +534,50 @@ int main() {
     require_mutation_fails(
         relay_harness.replace(relay_definition, relay_mutation), protocol, "relay_timeout_mutated")
 
+    # Реле, переключённое с меню Nano, обязано сменить generation: только по нему Самовар
+    # перечитывает настройки, иначе его следующий APPLY вернёт реле в старое положение.
+    local_relay_definition = ("bool set_rele_state(byte r, bool s) {" +
+                              function_body("bool set_rele_state(byte r, bool s)") + "}")
+    local_relay_harness = r"""
+#include <assert.h>
+#include <stdint.h>
+#include <I2CStepperV3.h>
+
+typedef uint8_t byte;
+#define bitWrite(value, bit, state) ((state) ? ((value) |= (1U << (bit))) : ((value) &= ~(1U << (bit))))
+I2CStepperV3Config v3_staging_config = {};
+I2CStepperV3Config v3_active_config = {};
+I2CStepperV3StatusSnapshot v3_status_snapshot = {};
+struct { uint8_t relayMask; } I2CSTPSetup = {};
+uint8_t rele_state = 0;
+uint8_t rele_pin[] = {1, 2, 3, 4};
+uint8_t relay_levels[4] = {};
+void digitalWrite(uint8_t pin, uint8_t level) { relay_levels[pin - 1] = level; }
+
+@LOCAL_RELAY@
+
+int main() {
+  v3_status_snapshot.generation = 7U;
+  set_rele_state(1, true);
+  assert(v3_status_snapshot.generation == 8U && v3_active_config.relayMask == 0x01U &&
+         v3_staging_config.relayMask == 0x01U && relay_levels[0] == 1U);
+  set_rele_state(3, true);
+  assert(v3_status_snapshot.generation == 9U && v3_active_config.relayMask == 0x05U &&
+         relay_levels[2] == 1U);
+  set_rele_state(1, false);
+  assert(v3_status_snapshot.generation == 10U && v3_active_config.relayMask == 0x04U &&
+         I2CSTPSetup.relayMask == 0x04U && rele_state == 0x04U && relay_levels[0] == 0U);
+  assert(!set_rele_state(5, true) && v3_status_snapshot.generation == 10U);
+  return 0;
+}
+""".replace("@LOCAL_RELAY@", local_relay_definition)
+    assert compile_and_run(local_relay_harness, protocol, "local_relay").returncode == 0
+    local_relay_mutation = local_relay_definition.replace("v3_status_snapshot.generation++;", "", 1)
+    assert local_relay_mutation != local_relay_definition, "local relay generation mutation anchor is missing"
+    require_mutation_fails(
+        local_relay_harness.replace(local_relay_definition, local_relay_mutation), protocol,
+        "local_relay_mutated")
+
     runtime_body = function_body("void update_runtime_state()")
     runtime_definition = "void update_runtime_state() {" + runtime_body + "}"
     runtime_harness = r'''

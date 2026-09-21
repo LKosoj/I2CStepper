@@ -825,6 +825,9 @@ bool set_rele_state(byte r, bool s) {
   v3_staging_config.relayMask = relay_mask;
   I2CSTPSetup.relayMask = relay_mask;
   bitWrite(rele_state, r - 1, s);
+  // Самовар перечитывает настройки только при смене generation. Без этого он не знает о реле,
+  // переключённом с меню, и следующим APPLY (каждый старт мешалки) возвращает старую маску.
+  v3_status_snapshot.generation++;
 
   digitalWrite(rele_pin[r - 1], s);
 #ifdef __I2CStepper_DEBUG
